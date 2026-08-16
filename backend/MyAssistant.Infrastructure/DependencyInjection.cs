@@ -15,7 +15,9 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        var connection = config.GetConnectionString("Default") ?? config["DATABASE_CONNECTION_STRING"];
+        // Env var takes priority (Render/Heroku) so hosted deployments don't
+        // fall back to the localhost connection in appsettings.json.
+        var connection = config["DATABASE_CONNECTION_STRING"] ?? config.GetConnectionString("Default");
         if (string.IsNullOrWhiteSpace(connection))
             connection = "Host=localhost;Port=5432;Database=myassistant;Username=postgres;Password=postgres";
 
