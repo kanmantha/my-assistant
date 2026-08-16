@@ -67,10 +67,13 @@ class WakeWordService {
   Future<void> _loop(void Function() onWake) async {
     while (_running) {
       final hit = await _listenOnce(onWake);
-      // A short pause between windows lets the recognizer reset cleanly;
-      // _running may have been set false by stop() during listen.
-      if (_running && !hit) {
-        await Future<void>.delayed(const Duration(milliseconds: 400));
+      // A short pause between windows lets the recognizer reset cleanly; a
+      // longer one after a wake lets the navigation settle before the next
+      // window begins. _running may have been set false by stop().
+      if (_running) {
+        await Future<void>.delayed(hit
+            ? const Duration(milliseconds: 1200)
+            : const Duration(milliseconds: 350));
       }
     }
   }
@@ -84,44 +87,39 @@ class WakeWordService {
     try {
       await _speech.listen(
         onResult: (result) {
+          if (completer.isCompleted) return;
           final words = result.recognizedWords.toLowerCase();
           if (_matches(words)) {
             completer.complete(true);
+          } else if (result.finalResult) {
+            // The recognizer reports window end (silence or listenFor), so
+            // restart promptly instead of waiting out a fixed timeout.
+            completer.complete(false);
           }
         },
         listenOptions: SpeechListenOptions(
           partialResults: true,
           listenMode: ListenMode.confirmation,
-          listenFor: const Duration(seconds: 5),
-          pauseFor: const Duration(seconds: 5),
+          listenFor: const Duration(seconds: 6),
+          pauseFor: const Duration(seconds: 3),
           cancelOnError: true,
         ),
       );
-      // Wait for a result-bearing stop: either our match, or the window
-      // timing out (final/no-match) after ~listenFor + pauseFor.
-      final hit = await completer.future.timeout(
-        const Duration(seconds: 12),
-        onTimeout: () => false,
-      );
-      if (hit) {
-        _listening = false;
-        await _stopListen();
-        if (_running) {
-          // A real match: fire the wake event on a microtask so the
-          // caller can toggle UI before the loop exits.
-          onWake();
-        }
-        _running = false;
-        return true;
-      }
     } catch (_) {
       // Cancelled or transient error; treat as a no-match window.
-    } finally {
-      _listening = false;
+      if (!completer.isCompleted) completer.complete(false);
     }
-    if (!_running) return true;
+    // Safety net in case the platform never reports window end.
+    final hit = await completer.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => false,
+    );
     await _stopListen();
-    return false;
+    _listening = false;
+    if (hit && _running) {
+      onWake();
+    }
+    return hit;
   }
 
   bool _matches(String words) {
