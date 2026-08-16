@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="MyAssistant.API/MyAssistant.API.csproj" />
+  <Project Path="MyAssistant.Application/MyAssistant.Application.csproj" />
+  <Project Path="MyAssistant.Domain/MyAssistant.Domain.csproj" />
+  <Project Path="MyAssistant.Infrastructure/MyAssistant.Infrastructure.csproj" />
+  <Project Path="MyAssistant.Tests/MyAssistant.Tests.csproj" />
+</Solution>

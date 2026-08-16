@@ -1,0 +1,31 @@
+# Flutter / Dart
+mobile/.dart_tool/
+mobile/build/
+mobile/.flutter-plugins-dependencies
+mobile/.idea/
+mobile/*.iml
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/app/.cxx/
+mobile/android/**/build/
+mobile/ios/**/build/
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+mobile/ios/Flutter/ephemeral/
+
+# .NET
+backend/**/bin/
+backend/**/obj/
+backend/**/logs/
+**/*.user
+
+# Env / secrets
+**/.env
+backend/.env.example
+!backend/.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vs/
