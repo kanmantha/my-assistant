@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../providers/assistant_provider.dart';
 import '../services/api_client.dart';
@@ -16,6 +19,8 @@ class AssistantScreen extends StatefulWidget {
 class _AssistantScreenState extends State<AssistantScreen> {
   final _controller = TextEditingController();
   final _scroll = ScrollController();
+  final _speech = stt.SpeechToText();
+  bool _speechInitialized = false;
 
   @override
   void dispose() {
@@ -118,9 +123,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
               speaking: assistant.speaking,
               busy: assistant.busy,
               onSend: _send,
-              onMic: () => _mockVoiceText(assistant),
+              onMic: () => _startListening(),
               onStop: () {
-                assistant.setSpeaking(false);
+                _stopListening();
                 _send();
               },
             ),
@@ -130,16 +135,48 @@ class _AssistantScreenState extends State<AssistantScreen> {
     );
   }
 
-  /// Emulates a voice interaction. On the emulator speech-to-text needs Google
-  /// services; we first try the on-device recognizer, else typed text works.
-  void _mockVoiceText(AssistantProvider assistant) {
+  Future<void> _startListening() async {
+    final assistant = context.read<AssistantProvider>();
+    if (!_speechInitialized) {
+      _speechInitialized = await _speech.initialize(
+        onError: (e) {
+          assistant.setListening(false);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Speech error: ${e.errorMsg}')),
+            );
+          }
+        },
+      );
+      if (!_speechInitialized) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Speech recognition unavailable on this device')),
+          );
+        }
+        return;
+      }
+    }
     assistant.setListening(true);
-    Future.delayed(const Duration(milliseconds: 700), () {
-      assistant.setListening(false);
-      assistant.setSpeaking(true);
-      _controller.text = 'Remind me to call mom tomorrow at 9 am';
-      _send();
-    });
+    await _speech.listen(
+      onResult: (result) {
+        if (result.finalResult && result.recognizedWords.isNotEmpty) {
+          assistant.setListening(false);
+          _controller.text = result.recognizedWords;
+          _send();
+        }
+      },
+      listenOptions: stt.SpeechListenOptions(
+        listenFor: const Duration(seconds: 15),
+        pauseFor: const Duration(seconds: 5),
+        listenMode: stt.ListenMode.dictation,
+      ),
+    );
+  }
+
+  void _stopListening() {
+    _speech.stop();
+    context.read<AssistantProvider>().setListening(false);
   }
 }
 

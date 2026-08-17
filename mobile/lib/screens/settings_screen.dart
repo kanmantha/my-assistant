@@ -140,16 +140,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     children: [
                       SwitchListTile(
                         value: wake.enabled,
-                        onChanged: (v) {
+                        onChanged: (v) async {
+                          final messenger = ScaffoldMessenger.of(context);
                           if (v) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            messenger.showSnackBar(
                               const SnackBar(
                                 content: Text('Listening for "Hey Assistant"… Microphone permission may be requested.'),
                                 duration: Duration(seconds: 3),
                               ),
                             );
                           }
-                          wake.setEnabled(v);
+                          await wake.setEnabled(v);
+                          if (mounted && !wake.running && wake.enabled) {
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('Speech recognition could not start. Check microphone permission and try again.'),
+                                duration: Duration(seconds: 4),
+                              ),
+                            );
+                          }
                         },
                         title: const Text('Wake word'),
                         subtitle: Text(

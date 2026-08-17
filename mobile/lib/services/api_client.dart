@@ -72,16 +72,16 @@ class ApiClient {
       final encoded = body == null ? null : jsonEncode(body);
       switch (method) {
         case 'GET':
-          resp = await _client.get(uri, headers: _headers()).timeout(const Duration(seconds: 20));
+          resp = await _client.get(uri, headers: _headers()).timeout(const Duration(seconds: 60));
           break;
         case 'POST':
-          resp = await _client.post(uri, headers: _headers(), body: encoded).timeout(const Duration(seconds: 20));
+          resp = await _client.post(uri, headers: _headers(), body: encoded).timeout(const Duration(seconds: 60));
           break;
         case 'PUT':
-          resp = await _client.put(uri, headers: _headers(), body: encoded).timeout(const Duration(seconds: 20));
+          resp = await _client.put(uri, headers: _headers(), body: encoded).timeout(const Duration(seconds: 60));
           break;
         default:
-          resp = await _client.delete(uri, headers: _headers()).timeout(const Duration(seconds: 20));
+          resp = await _client.delete(uri, headers: _headers()).timeout(const Duration(seconds: 60));
       }
 } on SocketException {
       throw ApiException(0, 'No network connection');
@@ -116,7 +116,7 @@ class ApiClient {
     final encoded = jsonEncode({'refreshToken': refresh});
     final resp = await _client
         .post(uri, headers: {'Content-Type': 'application/json'}, body: encoded)
-        .timeout(const Duration(seconds: 20));
+        .timeout(const Duration(seconds: 60));
     if (resp.statusCode >= 400) {
       _accessToken = null;
       _refreshToken = null;
