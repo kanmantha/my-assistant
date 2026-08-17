@@ -1,0 +1,6 @@
+@MyAssistant.API_HostAddress = http://localhost:5036
+
+GET {{MyAssistant.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

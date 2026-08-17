@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/backend/">
+    <Project Path="backend/MyAssistant.API/MyAssistant.API.csproj" DefaultStartup="true" />
+    <Project Path="backend/MyAssistant.Application/MyAssistant.Application.csproj" />
+    <Project Path="backend/MyAssistant.Domain/MyAssistant.Domain.csproj" />
+    <Project Path="backend/MyAssistant.Infrastructure/MyAssistant.Infrastructure.csproj" />
+    <Project Path="backend/MyAssistant.Tests/MyAssistant.Tests.csproj" />
+  </Folder>
+  <Folder Name="/frontend/">
+    <File Path="frontend/package.json" />
+  </Folder>
+</Solution>

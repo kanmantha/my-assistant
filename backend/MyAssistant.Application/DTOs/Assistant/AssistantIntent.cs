@@ -1,0 +1,33 @@
+namespace MyAssistant.Application.DTOs.Assistant;
+
+public enum AssistantIntent
+{
+    CreateNote,
+    CreateTask,
+    CreateReminder,
+    CreateAppointment,
+    UpdateTask,
+    CompleteTask,
+    DeleteTask,
+    DeleteNote,
+    DeleteReminder,
+    DeleteAppointment,
+    ListTasks,
+    ListNotes,
+    ListReminders,
+    ListAppointments,
+    TodaySchedule,
+    TomorrowSchedule,
+    SearchNotes,
+    SearchTasks,
+    SearchReminders,
+    SearchAppointments,
+    RescheduleAppointment,
+    CancelAction,
+    Help,
+    ChangeLanguage,
+    Greeting,
+    Confirmation,
+    Denial,
+    Unknown
+}

@@ -1,0 +1,26 @@
+# .NET
+backend/**/bin/
+backend/**/obj/
+backend/**/logs/
+backend/**/*.db
+backend/**/*.db-shm
+backend/**/*.db-wal
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Docker
+docker-compose.override.yml
+
