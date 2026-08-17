@@ -83,10 +83,12 @@ class ApiClient {
         default:
           resp = await _client.delete(uri, headers: _headers()).timeout(const Duration(seconds: 60));
       }
-} on SocketException {
+    } on SocketException {
       throw ApiException(0, 'No network connection');
     } on TimeoutException {
       throw ApiException(0, 'Request timed out');
+    } on http.ClientException {
+      throw ApiException(0, 'No network connection');
     }
 
     Map<String, dynamic>? decoded;
@@ -99,8 +101,9 @@ class ApiClient {
       return _send(method, path, body: body, query: query, retried: true);
     }
     if (resp.statusCode >= 400) {
-      final msg = decoded?['message']?.toString() ?? 'Request failed (${resp.statusCode})';
-      throw ApiException(resp.statusCode, msg, decoded?['errorCode']?.toString());
+      final msg = (decoded?['message'] ?? decoded?['Message'])?.toString() ?? 'Request failed (${resp.statusCode})';
+      final code = (decoded?['errorCode'] ?? decoded?['ErrorCode'])?.toString();
+      throw ApiException(resp.statusCode, msg, code);
     }
     return decoded ?? {};
   }

@@ -79,8 +79,9 @@ class _AuthShellState extends State<AuthShell> {
       }
     } catch (e) {
       if (mounted) {
+        final msg = e is ApiException ? e.message : e.toString();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString().replaceFirst('ApiException: ', 'Error: '))),
+          SnackBar(content: Text(msg)),
         );
       }
     } finally {
