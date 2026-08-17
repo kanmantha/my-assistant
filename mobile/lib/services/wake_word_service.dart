@@ -38,9 +38,10 @@ class WakeWordService {
 
   /// Initializes speech recognition (requesting mic permission if needed).
   /// Returns false when speech recognition is unavailable on this device.
+  bool get isWeb => kIsWeb;
+
   Future<bool> initialize() async {
     if (_initialized) return true;
-    if (kIsWeb) return false;
     try {
       _initialized = await _speech.initialize(
         onError: (err) {

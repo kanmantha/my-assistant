@@ -27,6 +27,7 @@ class WakeWordProvider extends ChangeNotifier {
   bool get available => _available;
   bool get running => _running;
   bool get listening => _listening;
+  bool get isWeb => WakeWordService.instance.isWeb;
 
   /// Loads the persisted setting and resumes listening when it is enabled.
   /// When signed in, the server is the source of truth (so toggles survive

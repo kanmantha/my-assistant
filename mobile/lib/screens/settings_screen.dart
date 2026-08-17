@@ -170,11 +170,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 color: wake.running ? AppTheme.success : null,
                               ),
                       ),
-                      if (wake.enabled && !wake.available)
+                      if (wake.isWeb)
                         const Padding(
                           padding: EdgeInsets.fromLTRB(16, 0, 16, 10),
                           child: Text(
-                            'Speech recognition unavailable on this device, so wake word cannot listen. Voice input may still work on the Assistant tab.',
+                            'Wake word works best on Android. On web, speech recognition may be interrupted by the browser.',
                             style: TextStyle(fontSize: 12, color: AppTheme.danger),
                           ),
                         ),
