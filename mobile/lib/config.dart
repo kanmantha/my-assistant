@@ -2,10 +2,11 @@
 class AppConfig {
   AppConfig._();
 
-  /// Emulator default gateway to host machine. Change for physical device / prod.
+  /// Points at the deployed backend by default. Override with
+  /// `--dart-define=API_BASE_URL=http://10.0.2.2:5088` for local emulator testing.
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:5088',
+    defaultValue: 'https://my-assistant-v35w.onrender.com',
   );
 
   static String get authTokenKey => 'auth_token';

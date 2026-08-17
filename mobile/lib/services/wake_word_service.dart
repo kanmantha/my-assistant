@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:speech_to_text/speech_to_text.dart';
 
 /// Continuous on-device wake-word listening built on [SpeechToText].
@@ -39,6 +40,7 @@ class WakeWordService {
   /// Returns false when speech recognition is unavailable on this device.
   Future<bool> initialize() async {
     if (_initialized) return true;
+    if (kIsWeb) return false;
     try {
       _initialized = await _speech.initialize(
         onError: (err) {
