@@ -35,7 +35,7 @@ public class UserSettings
     public Guid UserId { get; set; }
     public string Language { get; set; } = "en-IN";
     public bool VoiceEnabled { get; set; } = true;
-    public bool WakeWordEnabled { get; set; } = false;
+    public bool WakeWordEnabled { get; set; } = true;
     public bool NotificationsEnabled { get; set; } = true;
     public int DefaultReminderMinutes { get; set; } = 15;
     public string Timezone { get; set; } = "Asia/Kolkata";

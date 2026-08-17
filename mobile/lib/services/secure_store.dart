@@ -39,7 +39,10 @@ class SecureStore {
       _storage.write(key: _wakeWordKey, value: on ? '1' : '0');
 
   static Future<bool> isWakeWordEnabled() async =>
-      await _storage.read(key: _wakeWordKey) == '1';
+      await _storage.read(key: _wakeWordKey) != '0';
+
+  static Future<bool> hasWakeWordSetting() async =>
+      await _storage.read(key: _wakeWordKey) != null;
 
   static Future<void> clearAll() async {
     await _storage.deleteAll();

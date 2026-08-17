@@ -30,25 +30,36 @@ class WakeWordProvider extends ChangeNotifier {
   bool get isWeb => WakeWordService.instance.isWeb;
 
   /// Loads the persisted setting and resumes listening when it is enabled.
-  /// When signed in, the server is the source of truth (so toggles survive
-  /// reinstall/re-login); otherwise the local value is used.
+  /// Wake word is enabled by default. The backend value is only used to
+  /// seed the local preference on first sync (e.g. after a fresh login
+  /// with no local value yet).
   Future<void> restore() async {
     try {
-      _enabled = await SecureStore.isWakeWordEnabled();
-    } catch (_) {
-      _enabled = false;
-    }
-    final backend = _backend;
-    if (backend != null) {
-      try {
-        final settings = await backend.userSettings();
-        if (settings.wakeWordEnabled != null) {
-          _enabled = settings.wakeWordEnabled!;
-          await SecureStore.setWakeWord(_enabled);
+      final local = await SecureStore.isWakeWordEnabled();
+      // If the user has never toggled wake word, the key won't exist in
+      // SecureStore. isWakeWordEnabled() returns true for unset keys,
+      // so we check for an explicit '0' / '1' to distinguish "user set
+      // it off" from "first launch".
+      final explicit = await SecureStore.hasWakeWordSetting();
+      if (explicit) {
+        _enabled = local;
+      } else {
+        // First launch — seed from backend if available, otherwise default ON.
+        final backend = _backend;
+        if (backend != null) {
+          try {
+            final settings = await backend.userSettings();
+            _enabled = settings.wakeWordEnabled ?? true;
+          } catch (_) {
+            _enabled = true;
+          }
+        } else {
+          _enabled = true;
         }
-      } catch (_) {
-        // Not signed in or backend unreachable: keep local value.
+        await SecureStore.setWakeWord(_enabled);
       }
+    } catch (_) {
+      _enabled = true;
     }
     if (_enabled) {
       final ok = await start();
