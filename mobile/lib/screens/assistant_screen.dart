@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as dev;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -17,30 +18,22 @@ class AssistantScreen extends StatefulWidget {
   State<AssistantScreen> createState() => _AssistantScreenState();
 }
 
-class _AssistantScreenState extends State<AssistantScreen>
-    with WidgetsBindingObserver {
+class _AssistantScreenState extends State<AssistantScreen> {
   final _controller = TextEditingController();
   final _scroll = ScrollController();
   final _speech = stt.SpeechToText();
   bool _speechInitialized = false;
   bool _listeningActive = false;
   String _partialText = '';
+  bool _wasWakeRunning = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<AssistantProvider>().addListener(_onAssistantChange);
     });
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && _listeningActive) {
-      _stopListening();
-    }
   }
 
   void _onAssistantChange() {
@@ -48,7 +41,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     final assistant = context.read<AssistantProvider>();
     if (assistant.consumeAutoListen()) {
       _showWakeCue();
-      _startListening();
+      _startListening(fromWake: true);
     }
   }
 
@@ -56,15 +49,14 @@ class _AssistantScreenState extends State<AssistantScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Listening — speak your instruction…'),
-        duration: Duration(seconds: 3),
+        content: Text('Hey Assistant heard! Speak your command…'),
+        duration: Duration(seconds: 2),
       ),
     );
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     try { context.read<AssistantProvider>().removeListener(_onAssistantChange); } catch (_) {}
     _controller.dispose();
     _scroll.dispose();
@@ -163,7 +155,6 @@ class _AssistantScreenState extends State<AssistantScreen>
                         if (i < messages.length) {
                           return _Bubble(message: messages[i]);
                         }
-                        // Partial speech text indicator
                         return _PartialBubble(text: _partialText);
                       },
                     ),
@@ -174,7 +165,7 @@ class _AssistantScreenState extends State<AssistantScreen>
               speaking: assistant.speaking,
               busy: assistant.busy,
               onSend: _send,
-              onMic: () => _startListening(),
+              onMic: () => _startListening(fromWake: false),
               onStop: () {
                 _stopListening();
                 _send();
@@ -186,16 +177,16 @@ class _AssistantScreenState extends State<AssistantScreen>
     );
   }
 
-  Future<void> _startListening() async {
+  Future<void> _startListening({required bool fromWake}) async {
     if (_listeningActive) return;
     final assistant = context.read<AssistantProvider>();
 
-    // CRITICAL: Stop the wake word service first so it releases the mic.
+    // Stop the wake word service so it releases the mic.
     final wake = context.read<WakeWordProvider>();
-    final wasWakeRunning = wake.running;
-    if (wasWakeRunning) {
+    _wasWakeRunning = wake.running;
+    if (_wasWakeRunning) {
+      dev.log('[Assistant] stopping wake word for mic handoff');
       await wake.stop();
-      // Give the platform time to fully release the microphone.
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
 
@@ -208,6 +199,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     if (!_speechInitialized) {
       _speechInitialized = await _speech.initialize(
         onError: (e) {
+          dev.log('[Assistant] speech error: ${e.errorMsg}');
           _listeningActive = false;
           assistant.setListening(false);
           _speechInitialized = false;
@@ -217,10 +209,11 @@ class _AssistantScreenState extends State<AssistantScreen>
               SnackBar(content: Text('Speech error: ${e.errorMsg}')),
             );
           }
-          _restartWakeWord(wasWakeRunning);
+          _restartWakeWord();
         },
       );
       if (!_speechInitialized) {
+        dev.log('[Assistant] speech init failed');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -228,7 +221,7 @@ class _AssistantScreenState extends State<AssistantScreen>
             ),
           );
         }
-        _restartWakeWord(wasWakeRunning);
+        _restartWakeWord();
         return;
       }
     }
@@ -236,30 +229,30 @@ class _AssistantScreenState extends State<AssistantScreen>
     assistant.setListening(true);
     _listeningActive = true;
     setState(() => _partialText = '');
+    dev.log('[Assistant] starting to listen (fromWake=$fromWake)');
 
     final started = await _speech.listen(
       onResult: (result) {
         if (result.recognizedWords.isNotEmpty) {
           setState(() => _partialText = result.recognizedWords);
         }
-        if (result.finalResult && result.recognizedWords.isNotEmpty) {
+        if (result.finalResult) {
           _listeningActive = false;
           assistant.setListening(false);
-          _controller.text = result.recognizedWords;
-          setState(() => _partialText = '');
-          _send();
-          _restartWakeWord(wasWakeRunning);
-        } else if (result.finalResult) {
-          // Final result but empty — no speech detected.
-          _listeningActive = false;
-          assistant.setListening(false);
-          setState(() => _partialText = '');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('No speech detected. Try again.')),
-            );
+          if (result.recognizedWords.isNotEmpty) {
+            dev.log('[Assistant] final: "${result.recognizedWords}"');
+            _controller.text = result.recognizedWords;
+            setState(() => _partialText = '');
+            _send();
+          } else {
+            setState(() => _partialText = '');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('No speech detected. Try again.')),
+              );
+            }
           }
-          _restartWakeWord(wasWakeRunning);
+          _restartWakeWord();
         }
       },
       listenOptions: stt.SpeechListenOptions(
@@ -271,6 +264,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     );
 
     if (started != true) {
+      dev.log('[Assistant] listen() returned false');
       _listeningActive = false;
       assistant.setListening(false);
       _speechInitialized = false;
@@ -278,11 +272,11 @@ class _AssistantScreenState extends State<AssistantScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Could not start listening — mic may be busy. Try again.'),
+            content: Text('Could not start listening. Tap mic to retry.'),
           ),
         );
       }
-      _restartWakeWord(wasWakeRunning);
+      _restartWakeWord();
       return;
     }
 
@@ -293,7 +287,7 @@ class _AssistantScreenState extends State<AssistantScreen>
         assistant.setListening(false);
         setState(() => _partialText = '');
         try { _speech.stop(); } catch (_) {}
-        _restartWakeWord(wasWakeRunning);
+        _restartWakeWord();
       }
     });
   }
@@ -303,12 +297,14 @@ class _AssistantScreenState extends State<AssistantScreen>
     setState(() => _partialText = '');
     try { _speech.stop(); } catch (_) {}
     context.read<AssistantProvider>().setListening(false);
+    _restartWakeWord();
   }
 
-  void _restartWakeWord(bool wasRunning) {
-    if (!wasRunning) return;
-    Future<void>.delayed(const Duration(milliseconds: 1000), () {
+  void _restartWakeWord() {
+    if (!_wasWakeRunning) return;
+    Future<void>.delayed(const Duration(milliseconds: 1500), () {
       if (mounted) {
+        dev.log('[Assistant] restarting wake word');
         context.read<WakeWordProvider>().start();
       }
     });
@@ -349,8 +345,8 @@ class _EmptyState extends StatelessWidget {
                 style: const TextStyle(fontSize: 16, height: 1.5)),
             const SizedBox(height: 16),
             Text(
-              'Tap the mic button and speak your command.\n\n'
-              'Try saying:\n'
+              'Say "Hey Assistant" to get started.\n\n'
+              'Then try:\n'
               '• "Schedule a meeting with Ram at 3 PM"\n'
               '• "Create a task to buy groceries"\n'
               '• "Remind me to call mom tomorrow"\n'
@@ -488,7 +484,7 @@ class _InputBar extends StatelessWidget {
               onPressed: busy ? null : onMic,
               icon: Icon(listening ? Icons.graphic_eq : Icons.mic,
                   color: listening ? Colors.red : AppTheme.primary),
-              tooltip: 'Voice input',
+              tooltip: 'Tap to speak (or say "Hey Assistant")',
             ),
             Expanded(
               child: TextField(

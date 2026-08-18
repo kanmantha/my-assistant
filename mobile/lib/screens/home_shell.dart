@@ -32,14 +32,15 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     _wake = context.read<WakeWordProvider>();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Wake word heard → bring the user to the Assistant and auto-listen.
-      _wake?.onWake = () {
-        if (!mounted) return;
-        context.read<AssistantProvider>().requestAutoListen();
-        setState(() => _index = 2);
-      };
-    });
+    // Set onWake immediately so no wake detections are lost while the
+    // wake word loop starts in the background.
+    _wake?.onWake = _handleWake;
+  }
+
+  void _handleWake() {
+    if (!mounted) return;
+    context.read<AssistantProvider>().requestAutoListen();
+    setState(() => _index = 2);
   }
 
   @override
@@ -65,12 +66,17 @@ class _HomeShellState extends State<HomeShell> {
           NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
-      floatingActionButton: wake.running && !wake.listening
+      floatingActionButton: wake.running
           ? FloatingActionButton.small(
               onPressed: () => setState(() => _index = 2),
-              tooltip: 'Wake word active — say "Hey Assistant"',
-              backgroundColor: Colors.deepPurple.shade100,
-              child: const Icon(Icons.wb_twilight, color: Colors.deepPurple),
+              tooltip: 'Say "Hey Assistant"',
+              backgroundColor: wake.listening
+                  ? Colors.green.shade100
+                  : Colors.deepPurple.shade100,
+              child: Icon(
+                Icons.wb_twilight,
+                color: wake.listening ? Colors.green : Colors.deepPurple,
+              ),
             )
           : null,
     );
