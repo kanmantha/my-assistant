@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../providers/assistant_provider.dart';
 import '../providers/wake_word_provider.dart';
 import 'assistant_screen.dart';
 import 'dashboard_screen.dart';
@@ -32,9 +33,10 @@ class _HomeShellState extends State<HomeShell> {
     super.initState();
     _wake = context.read<WakeWordProvider>();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Wake word heard → bring the user to the Assistant.
+      // Wake word heard → bring the user to the Assistant and auto-listen.
       _wake?.onWake = () {
         if (!mounted) return;
+        context.read<AssistantProvider>().requestAutoListen();
         setState(() => _index = 2);
       };
     });

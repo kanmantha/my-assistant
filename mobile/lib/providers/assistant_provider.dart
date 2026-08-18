@@ -10,6 +10,7 @@ class AssistantProvider extends ChangeNotifier {
   bool _speaking = false;
   bool _busy = false;
   bool _demoMode = false;
+  bool _autoListen = false;
   final List<ChatMessage> _messages = [];
   String _languageCode = 'en-IN';
 
@@ -18,6 +19,7 @@ class AssistantProvider extends ChangeNotifier {
   bool get speaking => _speaking;
   bool get busy => _busy;
   bool get demoMode => _demoMode;
+  bool get autoListen => _autoListen;
   String get language => _languageCode;
 
   /// Syncs demo mode with persisted storage and clears chat history, so a
@@ -130,6 +132,20 @@ class AssistantProvider extends ChangeNotifier {
   void setListening(bool value) {
     _listening = value;
     notifyListeners();
+  }
+
+  /// Called by the wake-word handler to signal that the assistant screen
+  /// should immediately start listening for the user's instruction.
+  void requestAutoListen() {
+    _autoListen = true;
+    notifyListeners();
+  }
+
+  /// Consumes the auto-listen flag (returns true once, then resets).
+  bool consumeAutoListen() {
+    if (!_autoListen) return false;
+    _autoListen = false;
+    return true;
   }
 
   void setSpeaking(bool value) {

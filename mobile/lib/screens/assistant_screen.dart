@@ -23,7 +23,40 @@ class _AssistantScreenState extends State<AssistantScreen> {
   bool _speechInitialized = false;
 
   @override
+  void initState() {
+    super.initState();
+    // Listen for auto-listen requests triggered by the wake word.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<AssistantProvider>().addListener(_onAssistantChange);
+    });
+  }
+
+  void _onAssistantChange() {
+    if (!mounted) return;
+    final assistant = context.read<AssistantProvider>();
+    if (assistant.consumeAutoListen()) {
+      _showWakeCue();
+      _startListening();
+    }
+  }
+
+  /// Shows a brief snackbar so the user knows the assistant is listening
+  /// after a wake-word trigger.
+  void _showWakeCue() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Listening — speak your instruction…'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  @override
   void dispose() {
+    // Best-effort remove listener; provider may already be disposed.
+    try { context.read<AssistantProvider>().removeListener(_onAssistantChange); } catch (_) {}
     _controller.dispose();
     _scroll.dispose();
     super.dispose();
