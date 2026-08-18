@@ -17,6 +17,9 @@ frontend/dist/
 *.suo
 *.user
 
+# GitHub Actions (OAuth scope issue — add via web UI)
+.github/
+
 # OS
 Thumbs.db
 .DS_Store
