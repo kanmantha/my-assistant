@@ -109,6 +109,13 @@ builder.Services.AddHttpContextAccessor();
 
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
                      ?? new[] { "http://localhost:5173", "http://127.0.0.1:5173" };
+
+var frontendUrl = builder.Configuration["Email:FrontendUrl"];
+if (!string.IsNullOrWhiteSpace(frontendUrl) && !allowedOrigins.Contains(frontendUrl))
+{
+    allowedOrigins = [.. allowedOrigins, frontendUrl];
+}
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
