@@ -257,7 +257,11 @@ const DICT: Record<string, Record<UiLang, string>> = {
   failedSaveNote: { en: "Failed to save note", hi: "नोट सहेजने में विफल", te: "నోట్ సేవ్ చేయడం విఫలమైంది" },
   failedSaveTask: { en: "Failed to save task", hi: "कार्य सहेजने में विफल", te: "టాస్క్ సేవ్ చేయడం విఫలమైంది" },
   failedSaveReminder: { en: "Failed to save reminder", hi: "रिमाइंडर सहेजने में विफल", te: "రిమైండర్ సేవ్ చేయడం విఫలమైంది" },
-  failedSaveAppointment: { en: "Failed to save appointment", hi: "अपॉइंटमेंट सहेजने में विफल", te: "అపాయింట్‌మెంట్ సేవ్ చేయడం విఫలమైంది" }
+  failedSaveAppointment: { en: "Failed to save appointment", hi: "अपॉइंटमेंट सहेजने में विफल", te: "అపాయింట్‌మెంట్ సేవ్ చేయడం విఫలమైంది" },
+
+  // ---------- Mobile App ----------
+  mobileAppTitle: { en: "Get the Mobile App", hi: "मोबाइल ऐप प्राप्त करें", te: "మొబైల్ యాప్ పొందండి" },
+  mobileAppHint: { en: "Scan this QR code to open the app on your phone", hi: "अपने फ़ोन पर ऐप खोलने के लिए इस QR कोड को स्कैन करें", te: "మీ ఫోన్‌లో యాప్ తెరవడానికి ఈ QR కోడ్‌ను స్కాన్ చేయండి" }
 };
 
 export function t(key: string, lang: UiLang | string): string {

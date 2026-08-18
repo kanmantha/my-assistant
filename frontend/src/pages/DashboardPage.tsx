@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
-import { ListTodo, BellRing, StickyNote, Plus, ChevronRight } from "lucide-react";
+import { ListTodo, BellRing, StickyNote, Plus, ChevronRight, Smartphone } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { useAuth } from "../contexts/AuthContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { useAssistant } from "../contexts/AssistantContext";
@@ -11,6 +12,8 @@ import { Card } from "../components/ui";
 import { formatTime, getGreeting } from "../utils/date";
 import { statusColor } from "../utils/present";
 import { t, taskStatusLabel } from "../utils/locale";
+
+const MOBILE_APP_URL = "https://my-assistant-v35w.onrender.com";
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -51,6 +54,31 @@ export function DashboardPage() {
       <div className="glass-card mx-auto mb-8 max-w-2xl">
         <AssistantPanel />
       </div>
+
+      {/* Mobile App QR Code */}
+      <Card className="mx-auto mb-8 max-w-sm p-6 text-center">
+        <div className="mb-3 flex items-center justify-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
+          <Smartphone className="h-4 w-4" />
+          {t("mobileAppTitle", uiLang)}
+        </div>
+        <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+          {t("mobileAppHint", uiLang)}
+        </p>
+        <div className="inline-block rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700">
+          <QRCodeSVG
+            value={MOBILE_APP_URL}
+            size={180}
+            bgColor="transparent"
+            fgColor="currentColor"
+            level="M"
+            includeMargin={false}
+            className="text-slate-900 dark:text-slate-100"
+          />
+        </div>
+        <p className="mt-3 break-all text-[11px] font-medium text-brand-600 dark:text-brand-400">
+          {MOBILE_APP_URL}
+        </p>
+      </Card>
 
       {error && <ErrorBanner message={error} />}
       {loading && !data ? <LoadingBlock label={t("loading", uiLang)} /> : null}
