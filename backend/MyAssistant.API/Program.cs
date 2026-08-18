@@ -119,10 +119,22 @@ if (!string.IsNullOrWhiteSpace(frontendUrl) && !allowedOrigins.Contains(frontend
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
-        policy.WithOrigins(allowedOrigins)
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials());
+    {
+        if (builder.Environment.IsProduction())
+        {
+            policy.SetIsOriginAllowed(_ => true)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        }
+        else
+        {
+            policy.WithOrigins(allowedOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        }
+    });
 });
 
 var permitLimit = builder.Configuration.GetValue<int>("RateLimiting:GlobalPermitLimit", 300);
