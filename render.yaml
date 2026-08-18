@@ -1,37 +1,22 @@
 # Render Blueprint — MyAssistant
 # https://render.com/docs/blueprint-spec
-#
-# Deploy steps:
-#   1. Push this repo to GitHub
-#   2. Render Dashboard → New → Blueprint → select the repo
-#   3. Render reads this file and creates all resources automatically
-#   4. First deploy takes ~5-10 min (Docker build + npm install)
-#   5. Visit the Static Site URL once deploy finishes
 
 services:
   # ── Backend API (Docker) ──────────────────────────────────────────────
   - type: web
     name: myassistant-api
     runtime: docker
-    dockerfilePath: ./backend/MyAssistant.API/Dockerfile
-    dockerContext: .
     healthCheckPath: /health
     envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: myassistant-db
-          property: connectionString
       - key: Jwt__Secret
-        generateValue: true                 # 64-char random string
+        generateValue: true
       - key: Jwt__Issuer
         value: MyAssistant
       - key: Jwt__Audience
         value: MyAssistantClient
       - key: Cors__AllowedOrigins
-        sync: false                         # set after frontend URL is known
         value: '["https://myassistant-frontend.onrender.com"]'
       - key: Email__FrontendUrl
-        sync: false
         value: https://myassistant-frontend.onrender.com
       - key: AI__Provider
         value: local
@@ -47,12 +32,4 @@ services:
     staticPublishPath: ./frontend/dist
     envVars:
       - key: VITE_API_URL
-        sync: false                         # set after API URL is known
         value: https://myassistant-api.onrender.com/api
-
-# ── PostgreSQL Database ─────────────────────────────────────────────────
-databases:
-  - name: myassistant-db
-    plan: free
-    databaseName: myassistant
-    ipAllowList: []                         # Render internal only
