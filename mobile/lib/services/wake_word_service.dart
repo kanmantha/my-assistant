@@ -14,6 +14,10 @@ class WakeWordService {
   static final WakeWordService instance = WakeWordService._();
 
   final SpeechToText _speech;
+
+  /// Expose the shared instance so the assistant screen can use the same
+  /// [SpeechToText] rather than creating a competing platform recognizer.
+  SpeechToText get speech => _speech;
   bool _initialized = false;
   bool _running = false;
   bool _listening = false;
