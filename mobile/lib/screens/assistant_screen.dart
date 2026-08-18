@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../providers/assistant_provider.dart';
+import '../providers/wake_word_provider.dart';
 import '../services/api_client.dart';
 import '../services/backend_client.dart';
 import '../theme.dart';
@@ -16,20 +17,30 @@ class AssistantScreen extends StatefulWidget {
   State<AssistantScreen> createState() => _AssistantScreenState();
 }
 
-class _AssistantScreenState extends State<AssistantScreen> {
+class _AssistantScreenState extends State<AssistantScreen>
+    with WidgetsBindingObserver {
   final _controller = TextEditingController();
   final _scroll = ScrollController();
   final _speech = stt.SpeechToText();
   bool _speechInitialized = false;
   bool _listeningActive = false;
+  String _partialText = '';
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<AssistantProvider>().addListener(_onAssistantChange);
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _listeningActive) {
+      _stopListening();
+    }
   }
 
   void _onAssistantChange() {
@@ -53,6 +64,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     try { context.read<AssistantProvider>().removeListener(_onAssistantChange); } catch (_) {}
     _controller.dispose();
     _scroll.dispose();
@@ -63,6 +75,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
     _controller.clear();
+    setState(() => _partialText = '');
 
     final assistant = context.read<AssistantProvider>();
     assistant.addUserMessage(text);
@@ -97,7 +110,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
-        _scroll.animateTo(_scroll.position.maxScrollExtent, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        _scroll.animateTo(_scroll.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
       }
     });
   }
@@ -117,7 +131,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: assistant.demoMode ? AppTheme.success.withOpacity(0.15) : AppTheme.primary.withOpacity(0.1),
+                  color: assistant.demoMode
+                      ? AppTheme.success.withValues(alpha: 0.15)
+                      : AppTheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -137,13 +153,19 @@ class _AssistantScreenState extends State<AssistantScreen> {
         child: Column(
           children: [
             Expanded(
-              child: messages.isEmpty
+              child: messages.isEmpty && _partialText.isEmpty
                   ? _EmptyState(assistant: assistant)
                   : ListView.builder(
                       controller: _scroll,
                       padding: const EdgeInsets.all(16),
-                      itemCount: messages.length,
-                      itemBuilder: (context, i) => _Bubble(message: messages[i]),
+                      itemCount: messages.length + (_partialText.isNotEmpty ? 1 : 0),
+                      itemBuilder: (context, i) {
+                        if (i < messages.length) {
+                          return _Bubble(message: messages[i]);
+                        }
+                        // Partial speech text indicator
+                        return _PartialBubble(text: _partialText);
+                      },
                     ),
             ),
             _InputBar(
@@ -168,11 +190,20 @@ class _AssistantScreenState extends State<AssistantScreen> {
     if (_listeningActive) return;
     final assistant = context.read<AssistantProvider>();
 
-    // Stop any lingering session on THIS instance.
+    // CRITICAL: Stop the wake word service first so it releases the mic.
+    final wake = context.read<WakeWordProvider>();
+    final wasWakeRunning = wake.running;
+    if (wasWakeRunning) {
+      await wake.stop();
+      // Give the platform time to fully release the microphone.
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+
+    // Stop any lingering session on our own instance.
     try {
       if (_speech.isListening) await _speech.stop();
     } catch (_) {}
-    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await Future<void>.delayed(const Duration(milliseconds: 200));
 
     if (!_speechInitialized) {
       _speechInitialized = await _speech.initialize(
@@ -180,40 +211,62 @@ class _AssistantScreenState extends State<AssistantScreen> {
           _listeningActive = false;
           assistant.setListening(false);
           _speechInitialized = false;
+          setState(() => _partialText = '');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Speech error: ${e.errorMsg}')),
             );
           }
+          _restartWakeWord(wasWakeRunning);
         },
       );
       if (!_speechInitialized) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Speech recognition unavailable')),
+            const SnackBar(
+              content: Text('Speech recognition unavailable. Check microphone permission.'),
+            ),
           );
         }
+        _restartWakeWord(wasWakeRunning);
         return;
       }
     }
 
     assistant.setListening(true);
     _listeningActive = true;
+    setState(() => _partialText = '');
 
     final started = await _speech.listen(
       onResult: (result) {
+        if (result.recognizedWords.isNotEmpty) {
+          setState(() => _partialText = result.recognizedWords);
+        }
         if (result.finalResult && result.recognizedWords.isNotEmpty) {
           _listeningActive = false;
           assistant.setListening(false);
           _controller.text = result.recognizedWords;
+          setState(() => _partialText = '');
           _send();
+          _restartWakeWord(wasWakeRunning);
+        } else if (result.finalResult) {
+          // Final result but empty — no speech detected.
+          _listeningActive = false;
+          assistant.setListening(false);
+          setState(() => _partialText = '');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('No speech detected. Try again.')),
+            );
+          }
+          _restartWakeWord(wasWakeRunning);
         }
       },
       listenOptions: stt.SpeechListenOptions(
-        listenFor: const Duration(seconds: 20),
-        pauseFor: const Duration(seconds: 8),
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 10),
         listenMode: stt.ListenMode.dictation,
-        cancelOnError: true,
+        cancelOnError: false,
       ),
     );
 
@@ -221,28 +274,44 @@ class _AssistantScreenState extends State<AssistantScreen> {
       _listeningActive = false;
       assistant.setListening(false);
       _speechInitialized = false;
+      setState(() => _partialText = '');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not start listening — mic may be busy')),
+          const SnackBar(
+            content: Text('Could not start listening — mic may be busy. Try again.'),
+          ),
         );
       }
+      _restartWakeWord(wasWakeRunning);
       return;
     }
 
     // Safety timeout.
-    Future<void>.delayed(const Duration(seconds: 20), () {
+    Future<void>.delayed(const Duration(seconds: 30), () {
       if (_listeningActive && mounted) {
         _listeningActive = false;
         assistant.setListening(false);
+        setState(() => _partialText = '');
         try { _speech.stop(); } catch (_) {}
+        _restartWakeWord(wasWakeRunning);
       }
     });
   }
 
   void _stopListening() {
     _listeningActive = false;
+    setState(() => _partialText = '');
     try { _speech.stop(); } catch (_) {}
     context.read<AssistantProvider>().setListening(false);
+  }
+
+  void _restartWakeWord(bool wasRunning) {
+    if (!wasRunning) return;
+    Future<void>.delayed(const Duration(milliseconds: 1000), () {
+      if (mounted) {
+        context.read<WakeWordProvider>().start();
+      }
+    });
   }
 }
 
@@ -254,25 +323,88 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 110,
-            height: 110,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: const LinearGradient(colors: [AppTheme.primary, Color(0xFF8A7BFF)]),
-              boxShadow: [BoxShadow(color: AppTheme.primary.withOpacity(0.4), blurRadius: 30)],
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                    colors: [AppTheme.primary, Color(0xFF8A7BFF)]),
+                boxShadow: [
+                  BoxShadow(
+                      color: AppTheme.primary.withValues(alpha: 0.4),
+                      blurRadius: 30)
+                ],
+              ),
+              child: const Icon(Icons.mic, color: Colors.white, size: 48),
             ),
-            child: const Icon(Icons.auto_awesome, color: Colors.white, size: 52),
-          ),
-          const SizedBox(height: 24),
-          Text(assistant.demoGreeting, textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, height: 1.5)),
-          const SizedBox(height: 8),
-          Text('Tap the mic to speak, or type below.',
-              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-        ],
+            const SizedBox(height: 24),
+            Text(assistant.demoGreeting,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 16, height: 1.5)),
+            const SizedBox(height: 16),
+            Text(
+              'Tap the mic button and speak your command.\n\n'
+              'Try saying:\n'
+              '• "Schedule a meeting with Ram at 3 PM"\n'
+              '• "Create a task to buy groceries"\n'
+              '• "Remind me to call mom tomorrow"\n'
+              '• "Take a note about project deadline"',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  fontSize: 13,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  height: 1.5),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PartialBubble extends StatelessWidget {
+  final String text;
+
+  const _PartialBubble({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+        decoration: BoxDecoration(
+          color: AppTheme.primary.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: Colors.white.withValues(alpha: 0.8)),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                '$text…',
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 15, fontStyle: FontStyle.italic),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -291,9 +423,12 @@ class _Bubble extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 5),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
         decoration: BoxDecoration(
-          color: isUser ? AppTheme.primary : Theme.of(context).colorScheme.surface,
+          color: isUser
+              ? AppTheme.primary
+              : Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
@@ -303,7 +438,12 @@ class _Bubble extends StatelessWidget {
         ),
         child: Text(
           message.text,
-          style: TextStyle(color: isUser ? Colors.white : Theme.of(context).colorScheme.onSurface, fontSize: 15, height: 1.35),
+          style: TextStyle(
+              color: isUser
+                  ? Colors.white
+                  : Theme.of(context).colorScheme.onSurface,
+              fontSize: 15,
+              height: 1.35),
         ),
       ),
     );
@@ -335,7 +475,10 @@ class _InputBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8)],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+        ],
       ),
       child: SafeArea(
         top: false,
@@ -343,7 +486,8 @@ class _InputBar extends StatelessWidget {
           children: [
             IconButton(
               onPressed: busy ? null : onMic,
-              icon: Icon(listening ? Icons.graphic_eq : Icons.mic, color: AppTheme.primary),
+              icon: Icon(listening ? Icons.graphic_eq : Icons.mic,
+                  color: listening ? Colors.red : AppTheme.primary),
               tooltip: 'Voice input',
             ),
             Expanded(
@@ -351,7 +495,11 @@ class _InputBar extends StatelessWidget {
                 controller: controller,
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => onSend(),
-                decoration: InputDecoration(hintText: 'Type a command…', isDense: true, border: InputBorder.none, filled: false),
+                decoration: const InputDecoration(
+                    hintText: 'Type a command…',
+                    isDense: true,
+                    border: InputBorder.none,
+                    filled: false),
               ),
             ),
             IconButton.filled(
