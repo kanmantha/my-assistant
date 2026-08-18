@@ -7,7 +7,6 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../providers/assistant_provider.dart';
 import '../services/api_client.dart';
 import '../services/backend_client.dart';
-import '../services/wake_word_service.dart';
 import '../theme.dart';
 
 class AssistantScreen extends StatefulWidget {
@@ -20,13 +19,13 @@ class AssistantScreen extends StatefulWidget {
 class _AssistantScreenState extends State<AssistantScreen> {
   final _controller = TextEditingController();
   final _scroll = ScrollController();
-  late final stt.SpeechToText _speech;
+  final _speech = stt.SpeechToText();
+  bool _speechInitialized = false;
   bool _listeningActive = false;
 
   @override
   void initState() {
     super.initState();
-    _speech = WakeWordService.instance.speech;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<AssistantProvider>().addListener(_onAssistantChange);
@@ -42,21 +41,18 @@ class _AssistantScreenState extends State<AssistantScreen> {
     }
   }
 
-  /// Shows a brief snackbar so the user knows the assistant is listening
-  /// after a wake-word trigger.
   void _showWakeCue() {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Listening — speak your instruction…'),
-        duration: Duration(seconds: 2),
+        duration: Duration(seconds: 3),
       ),
     );
   }
 
   @override
   void dispose() {
-    // Best-effort remove listener; provider may already be disposed.
     try { context.read<AssistantProvider>().removeListener(_onAssistantChange); } catch (_) {}
     _controller.dispose();
     _scroll.dispose();
@@ -71,7 +67,6 @@ class _AssistantScreenState extends State<AssistantScreen> {
     final assistant = context.read<AssistantProvider>();
     assistant.addUserMessage(text);
 
-    // Demo mode: canned responses
     final demoResponse = assistant.demoRespond(text);
     if (demoResponse != null) {
       assistant.setBusy(false);
@@ -173,36 +168,26 @@ class _AssistantScreenState extends State<AssistantScreen> {
     if (_listeningActive) return;
     final assistant = context.read<AssistantProvider>();
 
-    // Ensure the shared SpeechToText is fully stopped and the platform has
-    // had time to release the microphone (especially after wake-word handoff).
-    if (_speech.isListening) {
-      await _speech.stop();
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-    }
+    // Stop any lingering session on THIS instance.
+    try {
+      if (_speech.isListening) await _speech.stop();
+    } catch (_) {}
+    await Future<void>.delayed(const Duration(milliseconds: 300));
 
-    // Initialize the shared instance if needed.
-    if (!_speech.isAvailable) {
-      final ok = await _speech.initialize(
+    if (!_speechInitialized) {
+      _speechInitialized = await _speech.initialize(
         onError: (e) {
           _listeningActive = false;
           assistant.setListening(false);
+          _speechInitialized = false;
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Speech error: ${e.errorMsg}')),
             );
           }
         },
-        onStatus: (status) {
-          if (status == stt.SpeechToText.notListeningStatus ||
-              status == stt.SpeechToText.doneStatus) {
-            if (_listeningActive) {
-              _listeningActive = false;
-              assistant.setListening(false);
-            }
-          }
-        },
       );
-      if (!ok) {
+      if (!_speechInitialized) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Speech recognition unavailable')),
@@ -235,6 +220,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
     if (started != true) {
       _listeningActive = false;
       assistant.setListening(false);
+      _speechInitialized = false;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not start listening — mic may be busy')),
@@ -243,19 +229,19 @@ class _AssistantScreenState extends State<AssistantScreen> {
       return;
     }
 
-    // Safety timeout: if no final result comes in 20s, auto-stop.
+    // Safety timeout.
     Future<void>.delayed(const Duration(seconds: 20), () {
       if (_listeningActive && mounted) {
         _listeningActive = false;
         assistant.setListening(false);
-        _speech.stop();
+        try { _speech.stop(); } catch (_) {}
       }
     });
   }
 
   void _stopListening() {
     _listeningActive = false;
-    _speech.stop();
+    try { _speech.stop(); } catch (_) {}
     context.read<AssistantProvider>().setListening(false);
   }
 }
