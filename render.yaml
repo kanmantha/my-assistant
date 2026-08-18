@@ -15,7 +15,7 @@ services:
     runtime: docker
     dockerfilePath: ./backend/MyAssistant.API/Dockerfile
     dockerContext: .
-    healthCheckPath: /api/settings          # returns 401 (up) or 500 (down)
+    healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         fromDatabase:

@@ -27,6 +27,11 @@ public static class DependencyInjection
         if (!string.IsNullOrWhiteSpace(databaseUrl))
         {
             connectionString = databaseUrl;
+            if (!connectionString.Contains("SSL Mode", StringComparison.OrdinalIgnoreCase) &&
+                !connectionString.Contains("sslmode", StringComparison.OrdinalIgnoreCase))
+            {
+                connectionString += connectionString.Contains('?') ? "&SSL Mode=Require" : "?SSL Mode=Require";
+            }
             services.AddDbContext<AppDbContext>(options =>
                 options.UseNpgsql(connectionString));
         }
