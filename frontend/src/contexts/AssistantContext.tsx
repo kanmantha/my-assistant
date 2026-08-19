@@ -29,6 +29,9 @@ interface AssistantContextValue {
   wakeListening: boolean;
   wakeEnabled: boolean;
   speaking: boolean;
+  voiceOverlayOpen: boolean;
+  openVoiceOverlay: () => void;
+  closeVoiceOverlay: () => void;
   toggleWakeWord: () => void;
   startListening: () => Promise<void>;
   stopListening: () => void;
@@ -67,6 +70,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [confirmation, setConfirmation] = useState<{ text: string; pendingAction?: string } | null>(null);
   const [capture, setCapture] = useState<{ type: "date" | "category" } | null>(null);
   const [wakeEnabled, setWakeEnabled] = useState(settings.wakeWordEnabled);
+  const [voiceOverlayOpen, setVoiceOverlayOpen] = useState(false);
 
   const statusRef = useRef<AssistantStatus>("idle");
   statusRef.current = status;
@@ -263,6 +267,16 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   const clearMessages = useCallback(() => setMessages([]), []);
 
+  const openVoiceOverlay = useCallback(() => {
+    setVoiceOverlayOpen(true);
+  }, []);
+
+  const closeVoiceOverlay = useCallback(() => {
+    setVoiceOverlayOpen(false);
+    setConfirmation(null);
+    setCapture(null);
+  }, []);
+
   useEffect(() => {
     setWakeEnabled(settings.wakeWordEnabled);
   }, [settings.wakeWordEnabled]);
@@ -280,6 +294,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       wakeListening: wake.state === "listening",
       wakeEnabled,
       speaking: tts.speaking,
+      voiceOverlayOpen,
+      openVoiceOverlay,
+      closeVoiceOverlay,
       toggleWakeWord,
       startListening,
       stopListening,
@@ -288,7 +305,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       clearMessages,
       sessionId
     }),
-    [status, messages, errorMessageFor, confirmation, capture, wakeEnabled, wake.state, tts.speaking, toggleWakeWord, startListening, stopListening, sendText, answerConfirmation, clearMessages, sessionId]
+    [status, messages, errorMessageFor, confirmation, capture, wakeEnabled, wake.state, tts.speaking, voiceOverlayOpen, openVoiceOverlay, closeVoiceOverlay, toggleWakeWord, startListening, stopListening, sendText, answerConfirmation, clearMessages, sessionId]
   );
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;

@@ -1,8 +1,9 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet } from "react-router-dom";
 import { Home, ListTodo, Calendar, StickyNote, BellRing, Settings, Search, MessageSquare, LogOut, Sparkles, History } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { useAssistant } from "../contexts/AssistantContext";
+import { VoiceOverlay } from "./VoiceOverlay";
 import { t } from "../utils/locale";
 
 const DESKTOP_NAV = [
@@ -28,7 +29,6 @@ export function AppLayout() {
   const { user, logout } = useAuth();
   const { settings } = useSettings();
   const assistant = useAssistant();
-  const navigate = useNavigate();
 
   const lang = settings.language;
   const uiLang = lang.toLowerCase() === "hi" ? "hi" : lang.toLowerCase() === "te" ? "te" : "en";
@@ -38,7 +38,6 @@ export function AppLayout() {
 
   const handleLogout = () => {
     logout();
-    navigate("/login");
   };
 
   return (
@@ -111,7 +110,7 @@ export function AppLayout() {
 
       {/* Floating mic */}
       <button
-        onClick={() => navigate("/")}
+        onClick={assistant.openVoiceOverlay}
         aria-label={t("openAssistant", uiLang)}
         className={`fixed bottom-20 right-4 z-30 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br text-white shadow-2xl transition-transform active:scale-90 lg:hidden ${
           assistant.status !== "idle"
@@ -121,6 +120,9 @@ export function AppLayout() {
       >
         <Sparkles className="h-7 w-7" />
       </button>
+
+      {/* Full-screen Siri-style voice overlay */}
+      <VoiceOverlay />
     </div>
   );
 }

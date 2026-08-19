@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Send, Mic, MicOff, Volume2, VolumeX, AlertCircle } from "lucide-react";
+import { Send, Mic, MicOff, Volume2, VolumeX, AlertCircle, Maximize2 } from "lucide-react";
 import { useAssistant, type AssistantStatus } from "../contexts/AssistantContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { MicOrb } from "./MicOrb";
@@ -56,9 +56,19 @@ export function AssistantPanel() {
   return (
     <div className="flex flex-col items-center px-4 py-6">
       {/* Status text */}
-      <p className="mb-1 text-sm font-semibold text-brand-700 dark:text-brand-300" aria-live="polite">
-        {t(statusKey, uiLang)}
-      </p>
+      <div className="mb-1 flex w-full items-center justify-between">
+        <p className="text-sm font-semibold text-brand-700 dark:text-brand-300" aria-live="polite">
+          {t(statusKey, uiLang)}
+        </p>
+        <button
+          onClick={assistant.openVoiceOverlay}
+          aria-label={t("fullscreen", uiLang)}
+          title={t("fullscreen", uiLang)}
+          className="btn-ghost rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-brand-600 dark:hover:bg-slate-800 dark:hover:text-brand-300"
+        >
+          <Maximize2 className="h-4 w-4" />
+        </button>
+      </div>
       <p className="mb-6 text-xs font-medium text-slate-400 dark:text-slate-500">
         {assistant.wakeListening ? `${t("wakeActive", uiLang)} · ` : ""}
         {t("say", uiLang)}

@@ -60,6 +60,10 @@ const DICT: Record<string, Record<UiLang, string>> = {
   mobileNav: { en: "Mobile navigation", hi: "मोबाइल नेविगेशन", te: "మొబైల్ నావిగేషన్" },
   openAssistant: { en: "Open assistant", hi: "असिस्टेंट खोलें", te: "అసిస్టెంట్ తెరవండి" },
   userFallback: { en: "User", hi: "उपयोगकर्ता", te: "వినియోగదారుడు" },
+  closeAssistant: { en: "Close assistant", hi: "असिस्टेंट बंद करें", te: "అసిస్టెంట్ మూసివేయండి" },
+  close: { en: "Close", hi: "बंद करें", te: "మూసివేయండి" },
+  fullscreen: { en: "Full screen", hi: "फुल स्क्रीन", te: "ఫుల్ స్క్రీన్" },
+  transcript: { en: "Transcript", hi: "ट्रांसक्रिप्ट", te: "ట్రాన్స్క్రిప్ట్" },
 
   // ---------- Auth ----------
   authLoginTitle: { en: "Welcome back", hi: "वापसी पर स्वागत है", te: "తిరిగి స్వాగతం" },
