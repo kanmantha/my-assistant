@@ -31,4 +31,9 @@ public class ConfigurableAIService : IAssistantAIService
         _useRemote
             ? _remote!.GenerateReplyAsync(intent, data, language, cancellationToken)
             : _local.GenerateReplyAsync(intent, data, language, cancellationToken);
+
+    public Task<string> AnswerQuestionAsync(string question, string language, CancellationToken cancellationToken = default) =>
+        _useRemote
+            ? _remote!.AnswerQuestionAsync(question, language, cancellationToken)
+            : _local.AnswerQuestionAsync(question, language, cancellationToken);
 }

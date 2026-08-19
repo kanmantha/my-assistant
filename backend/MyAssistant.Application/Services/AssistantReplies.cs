@@ -24,9 +24,9 @@ public static class AssistantReplies
 
     public static string Help(string lang) => lang switch
     {
-        "hi-IN" => "आप मुझसे बात करके नोट्स, कार्य, रिमाइंडर और मीटिंग्स बना सकते हैं। उदाहरण: \"एक नोट लिखो\", \"कल 9 बजे रिमाइंडर सेट करो\"।",
-        "te-IN" => "మీరు నాతో మాట్లాడి నోట్స్, పనులు, రిమైండర్‌లు మరియు మీటింగ్‌లు సృష్టించవచ్చు. ఉదాహరణ: \"ఒక నోట్ తీసుకో\", \"రేపు 9 గంటలకు రిమైండర్ సెట్ చేయి\".",
-        _ => "You can create notes, tasks, reminders and appointments by speaking to me. For example: \"Take a note\", \"Remind me tomorrow at 9 AM\"."
+        "hi-IN" => "आप मुझसे बात करके नोट्स, कार्य, रिमाइंडर और मीटिंग्स बना सकते हैं, और मुझसे सामान्य सवाल भी पूछ सकते हैं। उदाहरण: \"एक नोट लिखो\", \"कल 9 बजे रिमाइंडर सेट करो\", \"भारत की राजधानी क्या है?\"।",
+        "te-IN" => "మీరు నాతో మాట్లాడి నోట్స్, పనులు, రిమైండర్‌లు మరియు మీటింగ్‌లు సృష్టించవచ్చు, మరియు సాధారణ ప్రశ్నలు కూడా అడగవచ్చు. ఉదాహరణ: \"ఒక నోట్ తీసుకో\", \"రేపు 9 గంటలకు రిమైండర్ సెట్ చేయి\", \"భారత రాజధాని ఏమిటి?\".",
+        _ => "You can create notes, tasks, reminders and appointments by speaking to me, and ask me general questions too. For example: \"Take a note\", \"Remind me tomorrow at 9 AM\", \"What is the capital of India?\"."
     };
 
     public static string NotUnderstood(string lang) => lang switch

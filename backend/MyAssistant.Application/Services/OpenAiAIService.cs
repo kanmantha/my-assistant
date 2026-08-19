@@ -54,13 +54,24 @@ public class OpenAiAIService : IAssistantAIService
             The user's preferred language code is {language ?? "en-IN"}. The current local date and time is {now} in timezone {timeZone}.
             Use this timezone to resolve relative dates like tomorrow, next Monday, in 2 hours, at 6 PM.
             Produce JSON only with these fields:
-            intent (one of: CreateNote, CreateTask, CreateReminder, CreateAppointment, UpdateTask, CompleteTask, DeleteTask, DeleteNote, DeleteReminder, DeleteAppointment, ListTasks, ListNotes, ListReminders, ListAppointments, TodaySchedule, TomorrowSchedule, SearchNotes, SearchTasks, SearchReminders, SearchAppointments, RescheduleAppointment, CancelAction, Help, ChangeLanguage, Greeting, Confirmation, Denial, Unknown),
+            intent (one of: CreateNote, CreateTask, CreateReminder, CreateAppointment, UpdateTask, CompleteTask, DeleteTask, DeleteNote, DeleteReminder, DeleteAppointment, ListTasks, ListNotes, ListReminders, ListAppointments, TodaySchedule, TomorrowSchedule, SearchNotes, SearchTasks, SearchReminders, SearchAppointments, RescheduleAppointment, CancelAction, Help, ChangeLanguage, Greeting, Confirmation, Denial, GeneralQuestion, Weather, WebSearch, Unknown),
             title (string, keep original language, never translate), content, description, date (yyyy-MM-dd), time (HH:mm), endTime, durationMinutes (number), location, participants (array), recurrence (Once|Daily|Weekly|Monthly|Yearly), priority (Low|Medium|High|Urgent), status, searchQuery, category, language (the user's language code).
             If a field is unknown or not present, omit it or use null.
+            For questions or requests about general knowledge, facts, news, weather, or web searches that are NOT about the user's notes, tasks, reminders, or appointments, use intent GeneralQuestion, Weather, or WebSearch and put the user's question in title.
             """;
 
         var raw = await CompleteAsync(systemPrompt, text, 0.2, cancellationToken);
         return DeserializeCommand(raw, language);
+    }
+
+    public async Task<string> AnswerQuestionAsync(string question, string language, CancellationToken cancellationToken = default)
+    {
+        var systemPrompt = $"""
+            You are a helpful, friendly multilingual personal assistant. Answer the user's question clearly, accurately and concisely (1-3 short sentences) in the user's language (code: {language}).
+            If the question is about weather or news, answer from general knowledge and note that live data may not be available.
+            Never invent safety or health-critical facts; if unsure, say you don't know rather than guessing.
+            """;
+        return (await CompleteAsync(systemPrompt, question, 0.6, cancellationToken)).Trim();
     }
 
     public async Task<string> GenerateReplyAsync(string intent, Dictionary<string, object?>? data, string language, CancellationToken cancellationToken = default)

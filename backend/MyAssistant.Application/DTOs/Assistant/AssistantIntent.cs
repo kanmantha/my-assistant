@@ -29,5 +29,8 @@ public enum AssistantIntent
     Greeting,
     Confirmation,
     Denial,
+    GeneralQuestion,
+    Weather,
+    WebSearch,
     Unknown
 }

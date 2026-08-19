@@ -205,6 +205,42 @@ public class HeuristicAIServiceTests
         var parsed = await Parse("schedule a meeting with Ravi tomorrow at 10am", "en");
         parsed.Intent.Should().Be(AssistantIntent.CreateAppointment);
     }
+
+    [Fact]
+    public async Task Weather_English_IsWeatherIntent()
+    {
+        var parsed = await Parse("what is the weather in Hyderabad", "en");
+        parsed.Intent.Should().Be(AssistantIntent.Weather);
+    }
+
+    [Fact]
+    public async Task Weather_Hindi_IsWeatherIntent()
+    {
+        var parsed = await Parse("हैदराबाद का मौसम कैसा है", "hi");
+        parsed.Intent.Should().Be(AssistantIntent.Weather);
+    }
+
+    [Fact]
+    public async Task WebSearch_English_IsWebSearchIntent()
+    {
+        var parsed = await Parse("search the web for the latest AI news", "en");
+        parsed.Intent.Should().Be(AssistantIntent.WebSearch);
+        parsed.SearchQuery.Should().Contain("AI");
+    }
+
+    [Fact]
+    public async Task GeneralQuestion_EndsWithQuestionMark_IsGeneralQuestion()
+    {
+        var parsed = await Parse("why is the sky blue?", "en");
+        parsed.Intent.Should().Be(AssistantIntent.GeneralQuestion);
+    }
+
+    [Fact]
+    public async Task GeneralQuestion_ExplainPhrase_IsGeneralQuestion()
+    {
+        var parsed = await Parse("explain photosynthesis", "en");
+        parsed.Intent.Should().Be(AssistantIntent.GeneralQuestion);
+    }
 }
 
 public class AssistantServiceAutoLanguageTests
@@ -282,6 +318,42 @@ public class AssistantServiceAutoLanguageTests
         result.Should().NotBeNull();
         result.Intent.Should().Be(AssistantIntent.Unknown.ToString());
         result.Language.Should().Be("en-IN");
+    }
+
+    [Fact]
+    public async Task GeneralQuestion_PassesThroughToAiAnswer()
+    {
+        var ai = new Mock<IAssistantAIService>();
+        ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
+        ai.Setup(a => a.ParseCommandAsync("What is the capital of India?", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ParsedCommand { Intent = AssistantIntent.GeneralQuestion, Language = "en-IN", Title = "What is the capital of India?" });
+        ai.Setup(a => a.AnswerQuestionAsync("What is the capital of India?", "en-IN", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("The capital of India is New Delhi.");
+        var service = BuildService(ai, out var subscription);
+
+        var result = await service.ProcessAsync(new AssistantRequest { Text = "What is the capital of India?", Language = "en" }, Guid.NewGuid());
+
+        result.Intent.Should().Be(AssistantIntent.GeneralQuestion.ToString());
+        result.Reply.Should().Be("The capital of India is New Delhi.");
+        ai.Verify(a => a.AnswerQuestionAsync("What is the capital of India?", "en-IN", It.IsAny<CancellationToken>()), Times.Once);
+        subscription.Verify(s => s.RecordUsageAsync(It.IsAny<Guid>(), UsageType.AiCommand, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GeneralQuestion_AiFails_FallsBackToNotUnderstood()
+    {
+        var ai = new Mock<IAssistantAIService>();
+        ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
+        ai.Setup(a => a.ParseCommandAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ParsedCommand { Intent = AssistantIntent.WebSearch, Language = "en-IN", Title = "search for something" });
+        ai.Setup(a => a.AnswerQuestionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("provider down"));
+        var service = BuildService(ai, out _);
+
+        var result = await service.ProcessAsync(new AssistantRequest { Text = "search for something", Language = "en" }, Guid.NewGuid());
+
+        result.Reply.Should().Be(AssistantReplies.NotUnderstood("en-IN"));
+        result.Intent.Should().Be(AssistantIntent.WebSearch.ToString());
     }
 }
 

@@ -387,6 +387,11 @@ case AssistantIntent.CreateNote:
             case AssistantIntent.SearchAppointments:
                 return await SearchCoreAsync(userId, cmd, language, request, ct);
 
+            case AssistantIntent.GeneralQuestion:
+            case AssistantIntent.Weather:
+            case AssistantIntent.WebSearch:
+                return await GeneralQuestionCoreAsync(userId, cmd, language, request, ct);
+
             default:
                 return await FinalizeAsync(userId, request, AssistantReplies.NotUnderstood(language), language, cmd, ct);
         }
@@ -613,6 +618,30 @@ case AssistantIntent.CreateNote:
         var results = await _search.SearchAsync(userId, new SearchRequest { Query = query, Scopes = scopes }, ct);
         var msg = FormatSearchResults(results, query, language);
         return await FinalizeAsync(userId, request, msg, language, cmd, ct);
+    }
+
+    // ---------------------------------------------------------------
+    // General Q&A / weather / web search (passthrough)
+    // ---------------------------------------------------------------
+    private async Task<AssistantResponse> GeneralQuestionCoreAsync(
+        Guid userId, ParsedCommand cmd, string language, AssistantRequest request, CancellationToken ct)
+    {
+        var question = cmd.Title ?? request.Text ?? string.Empty;
+        string answer;
+        try
+        {
+            answer = await _ai.AnswerQuestionAsync(question, language, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AI provider failed for general question: {Question}", question);
+            answer = AssistantReplies.NotUnderstood(language);
+        }
+        if (string.IsNullOrWhiteSpace(answer))
+        {
+            answer = AssistantReplies.NotUnderstood(language);
+        }
+        return await FinalizeAsync(userId, request, answer, language, cmd, ct);
     }
 
     // ---------------------------------------------------------------

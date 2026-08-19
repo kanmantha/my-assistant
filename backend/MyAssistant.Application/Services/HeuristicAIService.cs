@@ -115,6 +115,21 @@ public class HeuristicAIService : IAssistantAIService
             return parsed;
         }
 
+        if (IsWeather(lower, lang))
+        {
+            parsed.Intent = AssistantIntent.Weather;
+            parsed.Title = t;
+            return parsed;
+        }
+
+        if (IsWebSearch(lower, lang))
+        {
+            parsed.Intent = AssistantIntent.WebSearch;
+            parsed.Title = t;
+            parsed.SearchQuery = ExtractSearchQuery(t, lang);
+            return parsed;
+        }
+
         if (IsSearch(lower, lang, out var searchIntent, out var searchQuery))
         {
             parsed.Intent = searchIntent;
@@ -175,6 +190,13 @@ public class HeuristicAIService : IAssistantAIService
             return parsed;
         }
 
+        if (IsGeneralQuestion(lower))
+        {
+            parsed.Intent = AssistantIntent.GeneralQuestion;
+            parsed.Title = t;
+            return parsed;
+        }
+
         parsed.Intent = AssistantIntent.Unknown;
         return parsed;
     }
@@ -182,6 +204,18 @@ public class HeuristicAIService : IAssistantAIService
     public Task<string> GenerateReplyAsync(string intent, Dictionary<string, object?>? data, string language, CancellationToken cancellationToken = default)
     {
         return Task.FromResult(string.Empty);
+    }
+
+    public Task<string> AnswerQuestionAsync(string question, string language, CancellationToken cancellationToken = default)
+    {
+        var lang = language?.ToLowerInvariant().StartsWith("hi") == true ? "hi" :
+                   language?.ToLowerInvariant().StartsWith("te") == true ? "te" : "en";
+        return Task.FromResult(lang switch
+        {
+            "hi" => "मैं अभी सामान्य सवालों का जवाब नहीं दे सकता क्योंकि ऑनलाइन सहायक सेवा उपलब्ध नहीं है। आप मुझसे नोट्स, कार्य, रिमाइंडर और मीटिंग्स के बारे में बात कर सकते हैं।",
+            "te" => "ఆన్‌లైన్ సహాయక సేవ అందుబాటులో లేనందున నేను ఇప్పుడు సాధారణ ప్రశ్నలకు సమాధానం ఇవ్వలేను. నోట్స్, పనులు, రిమైండర్‌లు మరియు మీటింగ్‌ల గురించి మీరు నాతో మాట్లాడవచ్చు.",
+            _ => "I can't answer general questions right now because the online assistant service isn't available. You can talk to me about notes, tasks, reminders and meetings."
+        });
     }
 
     private static bool IsGreeting(string lower, string lang) => lang switch
@@ -207,6 +241,56 @@ public class HeuristicAIService : IAssistantAIService
         "te" => lower.Contains("రద్దు"),
         _ => lower.Contains("cancel") || lower.Contains("stop") || lower.Contains("never mind")
     };
+
+    private static bool IsWeather(string lower, string lang) => lang switch
+    {
+        "hi" => lower.Contains("मौसम") || lower.Contains("मौसम का हाल") || lower.Contains("तापमान") || lower.Contains("बारिश होगी"),
+        "te" => lower.Contains("వాతావరణం") || lower.Contains("వాతావరణ") || lower.Contains("ఉష్ణోగ్రత") || lower.Contains("వర్షం"),
+        _ => lower.Contains("weather") || lower.Contains("temperature") || lower.Contains("forecast") || lower.Contains("raining") || lower.Contains("rain today")
+    };
+
+    private static bool IsWebSearch(string lower, string lang) => lang switch
+    {
+        "hi" => lower.Contains("खोजो") || lower.Contains("ढूंढो") || lower.Contains("गूगल"),
+        "te" => lower.Contains("వెతకండి") || lower.Contains("వెతక") || lower.Contains("గూగుల్"),
+        _ => lower.Contains("search the web") || lower.Contains("google ") || lower.Contains("look up") || lower.StartsWith("what is ") || lower.StartsWith("what are ") || lower.StartsWith("who is ") || lower.StartsWith("how do ") || lower.StartsWith("how does ")
+    };
+
+    private static bool IsGeneralQuestion(string lower)
+    {
+        return lower.EndsWith("?") ||
+               lower.StartsWith("why ") || lower.StartsWith("when ") || lower.StartsWith("where ") ||
+               lower.StartsWith("which ") || lower.StartsWith("who is ") || lower.StartsWith("what is ") ||
+               lower.StartsWith("explain ") || lower.StartsWith("tell me about ") ||
+               lower.Contains("how many") || lower.Contains("how much") || lower.Contains("how far");
+    }
+
+    private static string ExtractSearchQuery(string text, string lang)
+    {
+        if (lang == "hi")
+        {
+            var idx = text.IndexOf("ढूंढो", StringComparison.Ordinal);
+            if (idx < 0) idx = text.IndexOf("खोजो", StringComparison.Ordinal);
+            return idx >= 0 ? text[(idx + 3)..].Trim() : text;
+        }
+        if (lang == "te")
+        {
+            var idx = text.IndexOf("వెతకండి", StringComparison.Ordinal);
+            if (idx < 0) idx = text.IndexOf("వెతక", StringComparison.Ordinal);
+            return idx >= 0 ? text[(idx + 4)..].Trim() : text;
+        }
+        foreach (var prefix in new[] { "search the web for ", "search for ", "look up ", "google " })
+        {
+            var idx = text.ToLowerInvariant().IndexOf(prefix, StringComparison.Ordinal);
+            if (idx >= 0) return text[(idx + prefix.Length)..].Trim();
+        }
+        if (text.StartsWith("what is ", StringComparison.OrdinalIgnoreCase)) return text[8..].Trim();
+        if (text.StartsWith("what are ", StringComparison.OrdinalIgnoreCase)) return text[9..].Trim();
+        if (text.StartsWith("who is ", StringComparison.OrdinalIgnoreCase)) return text[7..].Trim();
+        if (text.StartsWith("how do ", StringComparison.OrdinalIgnoreCase)) return text[7..].Trim();
+        if (text.StartsWith("how does ", StringComparison.OrdinalIgnoreCase)) return text[9..].Trim();
+        return text;
+    }
 
     private static bool IsChangeLanguage(string text, string lang, out string newLang)
     {
