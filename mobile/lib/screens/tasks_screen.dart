@@ -43,11 +43,19 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
   Future<void> _add() async {
     final title = _titleCtrl.text.trim();
     if (title.isEmpty) return;
-    await context.read<TasksState>().add(title, description: _descCtrl.text.trim(), priority: _priority);
-    if (mounted) {
-      _titleCtrl.clear();
-      _descCtrl.clear();
-      Navigator.of(context).pop();
+    try {
+      await context.read<TasksState>().add(title, description: _descCtrl.text.trim(), priority: _priority);
+      if (mounted) {
+        _titleCtrl.clear();
+        _descCtrl.clear();
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save task: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 

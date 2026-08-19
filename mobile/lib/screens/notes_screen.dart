@@ -43,11 +43,19 @@ class _NotesScreenState extends State<NotesScreen> {
     final title = _titleCtrl.text.trim();
     final content = _contentCtrl.text.trim();
     if (title.isEmpty && content.isEmpty) return;
-    await context.read<NotesState>().add(title.isEmpty ? 'Untitled' : title, content);
-    if (mounted) {
-      _titleCtrl.clear();
-      _contentCtrl.clear();
-      Navigator.of(context).pop();
+    try {
+      await context.read<NotesState>().add(title.isEmpty ? 'Untitled' : title, content);
+      if (mounted) {
+        _titleCtrl.clear();
+        _contentCtrl.clear();
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save note: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 

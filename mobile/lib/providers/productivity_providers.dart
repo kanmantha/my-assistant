@@ -47,8 +47,15 @@ class TasksState extends ChangeNotifier {
   }
 
   Future<void> add(String title, {String description = '', String? priority}) async {
-    _tasks.insert(0, await _backend.createTask(title: title, description: description, priority: priority));
-    notifyListeners();
+    try {
+      _tasks.insert(0, await _backend.createTask(title: title, description: description, priority: priority));
+      _error = null;
+      notifyListeners();
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
   Future<void> toggle(String id) async {
@@ -106,8 +113,15 @@ class NotesState extends ChangeNotifier {
   }
 
   Future<void> add(String title, String content) async {
-    _notes.insert(0, await _backend.createNote(title: title, content: content));
-    notifyListeners();
+    try {
+      _notes.insert(0, await _backend.createNote(title: title, content: content));
+      _error = null;
+      notifyListeners();
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
   Future<void> remove(String id) async {
@@ -171,16 +185,23 @@ class AppointmentsState extends ChangeNotifier {
     String? location,
     String? participants,
   }) async {
-    final appt = await _backend.createAppointment(
-      title: title,
-      description: description,
-      startDateTime: startDateTime,
-      endDateTime: endDateTime,
-      location: location,
-      participants: participants,
-    );
-    _appointments.insert(0, appt);
-    notifyListeners();
+    try {
+      final appt = await _backend.createAppointment(
+        title: title,
+        description: description,
+        startDateTime: startDateTime,
+        endDateTime: endDateTime,
+        location: location,
+        participants: participants,
+      );
+      _appointments.insert(0, appt);
+      _error = null;
+      notifyListeners();
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
   Future<void> remove(String id) async {

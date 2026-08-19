@@ -100,19 +100,28 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: () {
+                  onPressed: () async {
                     if (titleCtrl.text.trim().isEmpty) return;
                     final dt = DateTime(
                       selectedDate.year, selectedDate.month, selectedDate.day,
                       selectedTime.hour, selectedTime.minute,
                     );
-                    context.read<AppointmentsState>().add(
-                      title: titleCtrl.text.trim(),
-                      description: descCtrl.text.trim(),
-                      startDateTime: dt.toIso8601String(),
-                      location: locationCtrl.text.trim().isEmpty ? null : locationCtrl.text.trim(),
-                    );
-                    Navigator.pop(ctx);
+                    final apptState = context.read<AppointmentsState>();
+                    try {
+                      await apptState.add(
+                        title: titleCtrl.text.trim(),
+                        description: descCtrl.text.trim(),
+                        startDateTime: dt.toIso8601String(),
+                        location: locationCtrl.text.trim().isEmpty ? null : locationCtrl.text.trim(),
+                      );
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    } catch (e) {
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(content: Text('Failed to save appointment: $e'), backgroundColor: Colors.red),
+                        );
+                      }
+                    }
                   },
                   child: const Text('Save Appointment'),
                 ),
