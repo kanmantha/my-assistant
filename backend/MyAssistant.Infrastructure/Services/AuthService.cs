@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using MyAssistant.Application.Common;
@@ -13,6 +14,8 @@ public class AuthService : IAuthService
     private readonly IPasswordHasher _hasher;
     private readonly ISubscriptionService _subscriptions;
     private readonly ILogger<AuthService> _logger;
+
+    private static readonly ConcurrentDictionary<string, (Guid UserId, DateTime Expiry)> _resetTokens = new();
 
     public AuthService(IUnitOfWork uow, ITokenService tokens, IPasswordHasher hasher, ISubscriptionService subscriptions, ILogger<AuthService> logger)
     {
@@ -97,23 +100,21 @@ public class AuthService : IAuthService
         var user = await _uow.Users.FirstOrDefaultAsync(u => u.Email == email.Trim().ToLowerInvariant());
         if (user is not null)
         {
-            user.PasswordResetToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-            user.PasswordResetTokenExpiry = DateTime.UtcNow.AddHours(1);
-            _uow.Users.Update(user);
-            await _uow.SaveChangesAsync();
-            _logger.LogInformation("Password reset token generated for {Email}: {Token}", email, user.PasswordResetToken);
+            var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+            _resetTokens[token] = (user.Id, DateTime.UtcNow.AddHours(1));
+            _logger.LogInformation("Password reset token generated for {Email}: {Token}", email, token);
         }
     }
 
     public async Task ResetPasswordAsync(string token, string newPassword)
     {
-        var user = await _uow.Users.FirstOrDefaultAsync(u => u.PasswordResetToken == token);
-        if (user is null || user.PasswordResetTokenExpiry == null || user.PasswordResetTokenExpiry < DateTime.UtcNow)
+        if (!_resetTokens.TryRemove(token, out var entry) || entry.Expiry < DateTime.UtcNow)
             throw new AppError("Invalid or expired reset token", 400, "INVALID_RESET_TOKEN");
 
+        var user = await _uow.Users.GetByIdAsync(entry.UserId)
+            ?? throw new AppError("User not found", 404, "USER_NOT_FOUND");
+
         user.PasswordHash = _hasher.Hash(newPassword);
-        user.PasswordResetToken = null;
-        user.PasswordResetTokenExpiry = null;
         _uow.Users.Update(user);
         await _uow.SaveChangesAsync();
         _logger.LogInformation("Password reset completed for {Email}", user.Email);
