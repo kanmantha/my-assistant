@@ -211,6 +211,8 @@ public class AssistantServiceAutoLanguageTests
     {
         var sessions = new Mock<IAssistantSessionStore>();
         var time = new Mock<ITimeZoneService>();
+        time.Setup(t => t.NowInTimeZone(It.IsAny<string>())).Returns(DateTime.Now);
+        var dateTimeParser = new DateTimeParserService(time.Object);
         var conversations = new Mock<IConversationRepository>();
         var settings = new Mock<ISettingsService>();
         settings.Setup(s => s.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
@@ -223,7 +225,7 @@ public class AssistantServiceAutoLanguageTests
         var appointments = new Mock<IAppointmentService>();
         var search = new Mock<ISearchService>();
         return new AssistantService(
-            ai.Object, sessions.Object, time.Object, settings.Object, conversations.Object,
+            ai.Object, sessions.Object, time.Object, dateTimeParser, settings.Object, conversations.Object,
             subscription.Object, logger.Object, notes.Object, tasks.Object, reminders.Object,
             appointments.Object, search.Object);
     }

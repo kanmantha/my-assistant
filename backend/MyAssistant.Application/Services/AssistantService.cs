@@ -24,6 +24,7 @@ public class AssistantService : IAssistantIntentService
     private readonly IAssistantAIService _ai;
     private readonly IAssistantSessionStore _sessions;
     private readonly ITimeZoneService _time;
+    private readonly IDateTimeParser _dateTimeParser;
     private readonly ISettingsService _settings;
     private readonly IConversationRepository _conversations;
     private readonly ISubscriptionService _subscription;
@@ -39,6 +40,7 @@ public class AssistantService : IAssistantIntentService
         IAssistantAIService ai,
         IAssistantSessionStore sessions,
         ITimeZoneService time,
+        IDateTimeParser dateTimeParser,
         ISettingsService settings,
         IConversationRepository conversations,
         ISubscriptionService subscription,
@@ -52,6 +54,7 @@ public class AssistantService : IAssistantIntentService
         _ai = ai;
         _sessions = sessions;
         _time = time;
+        _dateTimeParser = dateTimeParser;
         _settings = settings;
         _conversations = conversations;
         _subscription = subscription;
@@ -94,16 +97,84 @@ public class AssistantService : IAssistantIntentService
         await _subscription.RecordUsageAsync(userId, UsageType.AiCommand, request.Text, cancellationToken);
 
         var pending = _sessions.Get(userId, sessionId);
-        if (pending is not null && pending.Stage is 2 or 3)
+        if (pending is not null && pending.Stage is >= 2 and <= 5)
         {
-            // We're waiting for the note content / task title the user just said.
+            // Multi-turn guided capture: date (4), category (5), note content (2), task/appointment title (3).
             var text = request.Text?.Trim() ?? string.Empty;
+
+            // Cancellation always wins.
             if (command.Intent == AssistantIntent.Denial || IsNegative(text))
             {
                 _sessions.Clear(userId, sessionId);
                 var cancelled = AssistantReplies.Cancelled(language);
                 await RecordConversationAsync(userId, request, cancelled, AssistantIntent.CancelAction.ToString(), language, cancellationToken);
                 return BuildResponse(cancelled, AssistantIntent.CancelAction, language);
+            }
+
+            // "skip" / "none" keeps an optional field unset and advances to the next capture.
+            if (pending.Stage is 4 or 5 && IsSkip(text))
+            {
+                if (pending.Stage == 4) pending.Command.DateSkipped = true;
+                else pending.Command.CategorySkipped = true;
+                var nextSkip = NextCaptureStage(pending.Command);
+                if (nextSkip is null)
+                {
+                    _sessions.Clear(userId, sessionId);
+                    var doneSkip = await ExecuteCapturedAsync(userId, pending.Command, language, tz, request, sessionId, cancellationToken);
+                    await RecordConversationAsync(userId, request, doneSkip.Reply ?? string.Empty, pending.Command.Intent.ToString(), language, cancellationToken);
+                    return doneSkip;
+                }
+                pending.Stage = nextSkip.Value;
+                _sessions.Set(userId, sessionId, pending);
+                var askSkip = CapturePrompt(nextSkip.Value, pending.Command.Intent, language);
+                return BuildResponse(askSkip, pending.Command.Intent, language, captureType: CaptureTypeForStage(nextSkip.Value));
+            }
+
+            // Date capture: accept any phrase the date parser understands (e.g. "tomorrow")
+            // even though the AI might label it as a schedule intent — but NOT when the phrase
+            // carries a real command ("Today Tasks Reminders" lists reminders, it isn't a date).
+            if (pending.Stage == 4 &&
+                command.Intent is AssistantIntent.Unknown or AssistantIntent.TodaySchedule or AssistantIntent.TomorrowSchedule)
+            {
+                var parsedDate = await _dateTimeParser.ParseAsync(text, language, tz, cancellationToken);
+                if (parsedDate.HasDate || parsedDate.HasTime)
+                {
+                    pending.Command.Date = parsedDate.DateTime ?? pending.Command.Date;
+                    if (parsedDate.HasTime && parsedDate.DateTime.HasValue)
+                    {
+                        pending.Command.Time = TimeOnly.FromDateTime(parsedDate.DateTime.Value);
+                    }
+                    var nextDate = NextCaptureStage(pending.Command);
+                    if (nextDate is null)
+                    {
+                        _sessions.Clear(userId, sessionId);
+                        var resultDate = await ExecuteCapturedAsync(userId, pending.Command, language, tz, request, sessionId, cancellationToken);
+                        await RecordConversationAsync(userId, request, resultDate.Reply ?? string.Empty, pending.Command.Intent.ToString(), language, cancellationToken);
+                        return resultDate;
+                    }
+                    pending.Stage = nextDate.Value;
+                    _sessions.Set(userId, sessionId, pending);
+                    var askDate = CapturePrompt(nextDate.Value, pending.Command.Intent, language);
+                    return BuildResponse(askDate, pending.Command.Intent, language, captureType: CaptureTypeForStage(nextDate.Value));
+                }
+            }
+
+            // Category capture: accept known category words.
+            if (pending.Stage == 5 && IsCategoryWord(text))
+            {
+                pending.Command.Category = NormalizeCategory(text);
+                var nextCat = NextCaptureStage(pending.Command);
+                if (nextCat is null)
+                {
+                    _sessions.Clear(userId, sessionId);
+                    var resultCat = await ExecuteCapturedAsync(userId, pending.Command, language, tz, request, sessionId, cancellationToken);
+                    await RecordConversationAsync(userId, request, resultCat.Reply ?? string.Empty, pending.Command.Intent.ToString(), language, cancellationToken);
+                    return resultCat;
+                }
+                pending.Stage = nextCat.Value;
+                _sessions.Set(userId, sessionId, pending);
+                var askCat = CapturePrompt(nextCat.Value, pending.Command.Intent, language);
+                return BuildResponse(askCat, pending.Command.Intent, language, captureType: CaptureTypeForStage(nextCat.Value));
             }
 
             // A real command while we're mid-capture supersedes the pending capture.
@@ -115,32 +186,75 @@ public class AssistantService : IAssistantIntentService
 
             if (string.IsNullOrWhiteSpace(text))
             {
-                var stillAsk = pending.Stage == 2
-                    ? AssistantReplies.AskNoteContent(language)
-                    : AssistantReplies.AskTaskTitle(language);
-                return BuildResponse(stillAsk, pending.Command.Intent, language);
+                var stillAsk = CapturePrompt(pending.Stage, pending.Command.Intent, language);
+                return BuildResponse(stillAsk, pending.Command.Intent, language, captureType: CaptureTypeForStage(pending.Stage));
             }
 
-            _sessions.Clear(userId, sessionId);
-            var captured = pending.Stage == 2
-                ? new ParsedCommand
-                {
-                    Intent = AssistantIntent.CreateNote,
-                    Title = text.Length > 120 ? text[..120] : text,
-                    Content = text,
-                    Language = language
-                }
-                : new ParsedCommand
-                {
-                    Intent = AssistantIntent.CreateTask,
-                    Title = text.Length > 200 ? text[..200] : text,
-                    Language = language
-                };
-            var result = pending.Stage == 2
-                ? await CreateNoteCoreAsync(userId, captured, language, request, cancellationToken)
-                : await CreateTaskCoreAsync(userId, captured, language, request, cancellationToken);
-            await RecordConversationAsync(userId, request, result.Reply ?? string.Empty, captured.Intent.ToString(), language, cancellationToken);
-            return result;
+            switch (pending.Stage)
+            {
+                case 4: // capture date (fallback — plain text that wasn't recognized above)
+                    {
+                        var parsed = await _dateTimeParser.ParseAsync(text, language, tz, cancellationToken);
+                        pending.Command.Date = parsed.DateTime ?? pending.Command.Date;
+                        if (parsed.HasTime && parsed.DateTime.HasValue)
+                        {
+                            pending.Command.Time = TimeOnly.FromDateTime(parsed.DateTime.Value);
+                        }
+                        var nextDate = NextCaptureStage(pending.Command);
+                        if (nextDate is null)
+                        {
+                            _sessions.Clear(userId, sessionId);
+                            var resultDate = await ExecuteCapturedAsync(userId, pending.Command, language, tz, request, sessionId, cancellationToken);
+                            await RecordConversationAsync(userId, request, resultDate.Reply ?? string.Empty, pending.Command.Intent.ToString(), language, cancellationToken);
+                            return resultDate;
+                        }
+                        pending.Stage = nextDate.Value;
+                        _sessions.Set(userId, sessionId, pending);
+                        var askDate = CapturePrompt(nextDate.Value, pending.Command.Intent, language);
+                        return BuildResponse(askDate, pending.Command.Intent, language, captureType: CaptureTypeForStage(nextDate.Value));
+                    }
+                case 5: // capture category (fallback)
+                    {
+                        pending.Command.Category = NormalizeCategory(text);
+                        var nextCat = NextCaptureStage(pending.Command);
+                        if (nextCat is null)
+                        {
+                            _sessions.Clear(userId, sessionId);
+                            var resultCat = await ExecuteCapturedAsync(userId, pending.Command, language, tz, request, sessionId, cancellationToken);
+                            await RecordConversationAsync(userId, request, resultCat.Reply ?? string.Empty, pending.Command.Intent.ToString(), language, cancellationToken);
+                            return resultCat;
+                        }
+                        pending.Stage = nextCat.Value;
+                        _sessions.Set(userId, sessionId, pending);
+                        var askCat = CapturePrompt(nextCat.Value, pending.Command.Intent, language);
+                        return BuildResponse(askCat, pending.Command.Intent, language, captureType: CaptureTypeForStage(nextCat.Value));
+                    }
+                case 2: // capture note content
+                    {
+                        _sessions.Clear(userId, sessionId);
+                        pending.Command.Content = text;
+                        pending.Command.Title = string.IsNullOrWhiteSpace(pending.Command.Title)
+                            ? (text.Length > 120 ? text[..120] : text)
+                            : pending.Command.Title;
+                        var resultNote = await CreateNoteCoreAsync(userId, pending.Command, language, request, cancellationToken);
+                        await RecordConversationAsync(userId, request, resultNote.Reply ?? string.Empty, AssistantIntent.CreateNote.ToString(), language, cancellationToken);
+                        return resultNote;
+                    }
+                default: // capture task/appointment title
+                    {
+                        _sessions.Clear(userId, sessionId);
+                        pending.Command.Title = text.Length > 200 ? text[..200] : text;
+                        if (pending.Command.Intent == AssistantIntent.CreateAppointment)
+                        {
+                            var resultAppt = await CreateAppointmentCoreAsync(userId, pending.Command, language, tz, request, sessionId, cancellationToken, confirmFirst: true);
+                            await RecordConversationAsync(userId, request, resultAppt.Reply ?? string.Empty, AssistantIntent.CreateAppointment.ToString(), language, cancellationToken);
+                            return resultAppt;
+                        }
+                        var resultTask = await CreateTaskCoreAsync(userId, pending.Command, language, request, cancellationToken);
+                        await RecordConversationAsync(userId, request, resultTask.Reply ?? string.Empty, AssistantIntent.CreateTask.ToString(), language, cancellationToken);
+                        return resultTask;
+                    }
+            }
         }
 
         if (pending is not null && (command.Intent == AssistantIntent.Confirmation || command.Intent == AssistantIntent.Denial || IsAffirmative(request.Text) || IsNegative(request.Text)))
@@ -186,27 +300,40 @@ public class AssistantService : IAssistantIntentService
                 _sessions.Clear(userId, sessionId);
                 return await FinalizeAsync(userId, request, AssistantReplies.Cancelled(language), language, cmd, ct);
 
-            case AssistantIntent.CreateNote:
+case AssistantIntent.CreateNote:
                 if (string.IsNullOrWhiteSpace(cmd.Title) && string.IsNullOrWhiteSpace(cmd.Content))
                 {
-                    _sessions.Set(userId, sessionId, new PendingAction { Command = cmd, SessionId = sessionId, Stage = 2 });
-                    return await FinalizeAsync(userId, request, AssistantReplies.AskNoteContent(language), language, cmd, ct);
+                    var noteStart = NextCaptureStage(cmd);
+                    if (noteStart is not null)
+                    {
+                        _sessions.Set(userId, sessionId, new PendingAction { Command = cmd, SessionId = sessionId, Stage = noteStart.Value });
+                        return await FinalizeAsync(userId, request, CapturePrompt(noteStart.Value, cmd.Intent, language), language, cmd, ct, captureType: CaptureTypeForStage(noteStart.Value));
+                    }
                 }
                 return await CreateNoteCoreAsync(userId, cmd, language, request, ct);
 
             case AssistantIntent.CreateTask:
                 if (string.IsNullOrWhiteSpace(cmd.Title))
                 {
-                    _sessions.Set(userId, sessionId, new PendingAction { Command = cmd, SessionId = sessionId, Stage = 3 });
-                    return await FinalizeAsync(userId, request, AssistantReplies.AskTaskTitle(language), language, cmd, ct);
+                    var taskStart = NextCaptureStage(cmd);
+                    if (taskStart is not null)
+                    {
+                        _sessions.Set(userId, sessionId, new PendingAction { Command = cmd, SessionId = sessionId, Stage = taskStart.Value });
+                        return await FinalizeAsync(userId, request, CapturePrompt(taskStart.Value, cmd.Intent, language), language, cmd, ct, captureType: CaptureTypeForStage(taskStart.Value));
+                    }
                 }
                 return await CreateTaskCoreAsync(userId, cmd, language, request, ct);
 
-            case AssistantIntent.CreateReminder:
-                return await CreateReminderCoreAsync(userId, cmd, language, tz, request, ct);
-
             case AssistantIntent.CreateAppointment:
-                return await CreateAppointmentCoreAsync(userId, cmd, language, tz, request, sessionId, ct, confirmFirst: true);
+                {
+                    var apptStart = NextCaptureStage(cmd);
+                    if (apptStart is not null)
+                    {
+                        _sessions.Set(userId, sessionId, new PendingAction { Command = cmd, SessionId = sessionId, Stage = apptStart.Value });
+                        return await FinalizeAsync(userId, request, CapturePrompt(apptStart.Value, cmd.Intent, language), language, cmd, ct, captureType: CaptureTypeForStage(apptStart.Value));
+                    }
+                    return await CreateAppointmentCoreAsync(userId, cmd, language, tz, request, sessionId, ct, confirmFirst: true);
+                }
 
             case AssistantIntent.CompleteTask:
                 return await CompleteTaskCoreAsync(userId, cmd, language, request, sessionId, ct, confirmFirst: true);
@@ -294,7 +421,8 @@ public class AssistantService : IAssistantIntentService
         {
             Title = title,
             Content = cmd.Content ?? cmd.Title ?? title,
-            OriginalLanguage = language
+            OriginalLanguage = language,
+            Tags = string.IsNullOrWhiteSpace(cmd.Category) ? new List<string>() : new List<string> { cmd.Category }
         }, ct);
         var msg = AssistantReplies.NoteCreated(language);
         return await FinalizeAsync(userId, request, msg, language, cmd, ct);
@@ -514,10 +642,10 @@ public class AssistantService : IAssistantIntentService
     // Finalize
     // ---------------------------------------------------------------
     private async Task<AssistantResponse> FinalizeAsync(
-        Guid userId, AssistantRequest request, string response, string language, ParsedCommand cmd, CancellationToken ct, bool success = true)
+        Guid userId, AssistantRequest request, string response, string language, ParsedCommand cmd, CancellationToken ct, bool success = true, string? captureType = null)
     {
         await RecordConversationAsync(userId, request, response, cmd.Intent.ToString(), language, ct);
-        return BuildResponse(response, cmd.Intent, language);
+        return BuildResponse(response, cmd.Intent, language, captureType: captureType);
     }
 
     private async Task RecordConversationAsync(Guid userId, AssistantRequest request, string response, string intent, string language, CancellationToken ct)
@@ -542,7 +670,7 @@ public class AssistantService : IAssistantIntentService
 
     private static AssistantResponse BuildResponse(
         string reply, AssistantIntent intent, string language,
-        bool requiresConfirmation = false, string? confirmationPrompt = null, string? pendingAction = null)
+        bool requiresConfirmation = false, string? confirmationPrompt = null, string? pendingAction = null, string? captureType = null)
     {
         return new AssistantResponse
         {
@@ -552,8 +680,107 @@ public class AssistantService : IAssistantIntentService
             NeedsConfirmation = requiresConfirmation,
             ConfirmationPrompt = confirmationPrompt,
             PendingAction = pendingAction,
+            CaptureType = captureType,
             TtsText = reply
         };
+    }
+
+    // ---------------------------------------------------------------
+    // Guided capture helpers (multi-turn date/category/content/title)
+    // ---------------------------------------------------------------
+    private static int? NextCaptureStage(ParsedCommand cmd)
+    {
+        switch (cmd.Intent)
+        {
+            case AssistantIntent.CreateNote:
+                if (string.IsNullOrWhiteSpace(cmd.Category) && !cmd.CategorySkipped) return 5;
+                if (string.IsNullOrWhiteSpace(cmd.Content)) return 2;
+                return null;
+            case AssistantIntent.CreateTask:
+                if (cmd.Date is null && !cmd.DateSkipped) return 4;
+                if (string.IsNullOrWhiteSpace(cmd.Category) && !cmd.CategorySkipped) return 5;
+                if (string.IsNullOrWhiteSpace(cmd.Title)) return 3;
+                return null;
+            case AssistantIntent.CreateAppointment:
+                if (cmd.Date is null && !cmd.DateSkipped) return 4;
+                if (string.IsNullOrWhiteSpace(cmd.Title)) return 3;
+                return null;
+            default:
+                return null;
+        }
+    }
+
+    private static string CapturePrompt(int stage, AssistantIntent intent, string lang) => stage switch
+    {
+        4 => AssistantReplies.AskDate(lang),
+        5 => AssistantReplies.AskCategory(lang),
+        2 => AssistantReplies.AskNoteContent(lang),
+        3 => intent == AssistantIntent.CreateAppointment ? AssistantReplies.AskMeetingTitle(lang) : AssistantReplies.AskTaskTitle(lang),
+        _ => AssistantReplies.NotUnderstood(lang)
+    };
+
+    private static string CaptureTypeForStage(int stage) => stage switch
+    {
+        4 => "date",
+        5 => "category",
+        _ => "text"
+    };
+
+    private async Task<AssistantResponse> ExecuteCapturedAsync(
+        Guid userId, ParsedCommand cmd, string language, string tz, AssistantRequest request, string sessionId, CancellationToken ct)
+    {
+        return cmd.Intent switch
+        {
+            AssistantIntent.CreateNote => await CreateNoteCoreAsync(userId, cmd, language, request, ct),
+            AssistantIntent.CreateTask => await CreateTaskCoreAsync(userId, cmd, language, request, ct),
+            AssistantIntent.CreateAppointment => await CreateAppointmentCoreAsync(userId, cmd, language, tz, request, sessionId, ct, confirmFirst: true),
+            _ => await FinalizeAsync(userId, request, AssistantReplies.NotUnderstood(language), language, cmd, ct)
+        };
+    }
+
+    private static bool IsSkip(string text)
+    {
+        var lower = text.Trim().ToLowerInvariant();
+        return lower is "skip" or "none" or "no" or "nope" or "n/a" or "na" or "nothing" or "no date" or "no category" or "no thanks" ||
+               lower.StartsWith("skip ") ||
+               lower == "कोई नहीं" || lower.StartsWith("छोड़") || lower == "नहीं" ||
+               lower == "లేదు" || lower.StartsWith("వదిలేయి") || lower == "వద్దు";
+    }
+
+    private static bool IsCategoryWord(string text)
+    {
+        var lower = text.Trim().ToLowerInvariant();
+        return lower is "work" or "office" or "business" or "professional" or
+               "personal" or "home" or "family" or
+               "shopping" or "groceries" or "grocery" or "errands" or "market" or
+               "study" or "school" or "education" or "learning" or
+               "health" or "fitness" or "workout" or "gym" or "medical" or
+               "finance" or "money" or "bills" or "budget" or "accounts" or
+               "travel" or "trip" or "vacation" or "holiday" or
+               "other" or "misc" or "miscellaneous" or "general";
+    }
+
+    private static string NormalizeCategory(string text)
+    {
+        var lower = text.Trim().ToLowerInvariant();
+        return lower switch
+        {
+            "work" or "office" or "business" or "professional" => "Work",
+            "personal" or "home" or "family" => "Personal",
+            "shopping" or "groceries" or "grocery" or "errands" or "market" => "Shopping",
+            "study" or "school" or "education" or "learning" => "Study",
+            "health" or "fitness" or "workout" or "gym" or "medical" => "Health",
+            "finance" or "money" or "bills" or "budget" or "accounts" => "Finance",
+            "travel" or "trip" or "vacation" or "holiday" => "Travel",
+            "other" or "misc" or "miscellaneous" or "general" => "Other",
+            _ => CapitalizeFirst(text)
+        };
+    }
+
+    private static string CapitalizeFirst(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return input;
+        return char.ToUpperInvariant(input[0]) + input[1..];
     }
 
     // ---------------------------------------------------------------

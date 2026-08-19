@@ -265,6 +265,7 @@ export interface AssistantResponse {
   pendingAction?: string;
   data?: Record<string, unknown>;
   ttsText?: string;
+  captureType?: "date" | "category" | "text";
 }
 
 // ---------- Subscription / Usage ----------

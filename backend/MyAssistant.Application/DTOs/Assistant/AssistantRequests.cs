@@ -18,6 +18,7 @@ public class AssistantResponse
     public string? PendingAction { get; set; }
     public Dictionary<string, object?>? Data { get; set; }
     public string? TtsText { get; set; }
+    public string? CaptureType { get; set; }
 }
 
 public class CommandResponse

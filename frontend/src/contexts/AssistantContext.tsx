@@ -25,6 +25,7 @@ interface AssistantContextValue {
   micSupported: boolean;
   errorMessage: string | null;
   confirmation: { text: string; pendingAction?: string } | null;
+  capture: { type: "date" | "category" } | null;
   wakeListening: boolean;
   wakeEnabled: boolean;
   speaking: boolean;
@@ -64,6 +65,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<{ text: string; pendingAction?: string } | null>(null);
+  const [capture, setCapture] = useState<{ type: "date" | "category" } | null>(null);
   const [wakeEnabled, setWakeEnabled] = useState(settings.wakeWordEnabled);
 
   const statusRef = useRef<AssistantStatus>("idle");
@@ -119,6 +121,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       setStatus("processing");
       setErrorMessage(null);
       setConfirmation(null);
+      setCapture(null);
       pushMessage("user", trimmed);
       try {
         const res = await sendToBackend(trimmed, isVoice);
@@ -137,13 +140,20 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
         }
         const reply = res.reply ?? "Done.";
         pushMessage("assistant", reply);
-        if (res.needsConfirmation) {
-          setConfirmation({ text: res.confirmationPrompt ?? reply, pendingAction: res.pendingAction });
+        if (res.captureType === "date" || res.captureType === "category") {
+          setCapture({ type: res.captureType });
+          setConfirmation(null);
           setStatus("idle");
         } else {
-          setStatus("speaking");
-          await speakReply(res.ttsText ?? reply, replyLang);
-          setStatus("idle");
+          setCapture(null);
+          if (res.needsConfirmation) {
+            setConfirmation({ text: res.confirmationPrompt ?? reply, pendingAction: res.pendingAction });
+            setStatus("idle");
+          } else {
+            setStatus("speaking");
+            await speakReply(res.ttsText ?? reply, replyLang);
+            setStatus("idle");
+          }
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Request failed";
@@ -266,6 +276,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       micSupported: rec.supported,
       errorMessage: errorMessageFor,
       confirmation,
+      capture,
       wakeListening: wake.state === "listening",
       wakeEnabled,
       speaking: tts.speaking,
@@ -277,7 +288,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       clearMessages,
       sessionId
     }),
-    [status, messages, errorMessageFor, confirmation, wakeEnabled, wake.state, tts.speaking, toggleWakeWord, startListening, stopListening, sendText, answerConfirmation, clearMessages, sessionId]
+    [status, messages, errorMessageFor, confirmation, capture, wakeEnabled, wake.state, tts.speaking, toggleWakeWord, startListening, stopListening, sendText, answerConfirmation, clearMessages, sessionId]
   );
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;

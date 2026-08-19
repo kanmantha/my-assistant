@@ -4,6 +4,7 @@ import { useAssistant, type AssistantStatus } from "../contexts/AssistantContext
 import { useSettings } from "../contexts/SettingsContext";
 import { MicOrb } from "./MicOrb";
 import { t, languageName } from "../utils/locale";
+import { todayString } from "../utils/date";
 import { Button } from "./ui";
 
 const STATUS_TEXT: Record<AssistantStatus, string> = {
@@ -14,6 +15,17 @@ const STATUS_TEXT: Record<AssistantStatus, string> = {
   error: "error",
   "wake-listening": "listening"
 };
+
+const CATEGORIES = [
+  { key: "categoryWork", value: "Work" },
+  { key: "categoryPersonal", value: "Personal" },
+  { key: "categoryShopping", value: "Shopping" },
+  { key: "categoryStudy", value: "Study" },
+  { key: "categoryHealth", value: "Health" },
+  { key: "categoryFinance", value: "Finance" },
+  { key: "categoryTravel", value: "Travel" },
+  { key: "categoryOther", value: "Other" }
+];
 
 export function AssistantPanel() {
   const assistant = useAssistant();
@@ -82,6 +94,59 @@ export function AssistantPanel() {
               {t("no", uiLang)}
             </Button>
           </div>
+        </div>
+      )}
+
+      {/* Guided capture: date picker or category chips */}
+      {assistant.capture && (
+        <div className="glass-card mb-4 w-full max-w-md p-4">
+          <p className="mb-3 text-center text-sm font-medium text-slate-700 dark:text-slate-200">
+            {assistant.capture.type === "date" ? t("pickDate", uiLang) : t("pickCategory", uiLang)}
+          </p>
+          {assistant.capture.type === "date" ? (
+            <div className="flex flex-col items-center gap-3">
+              <input
+                type="date"
+                defaultValue={todayString()}
+                className="input w-full"
+                aria-label={t("pickDate", uiLang)}
+                id="assistant-date-picker"
+              />
+              <div className="flex w-full gap-2">
+                <Button
+                  className="flex-1"
+                  onClick={() => {
+                    const el = document.getElementById("assistant-date-picker") as HTMLInputElement | null;
+                    const value = el?.value ?? todayString();
+                    void assistant.sendText(value);
+                  }}
+                >
+                  {t("save", uiLang)}
+                </Button>
+                <Button variant="secondary" className="flex-1" onClick={() => void assistant.sendText("skip")}>
+                  {t("skip", uiLang)}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap justify-center gap-2">
+              {CATEGORIES.map((c) => (
+                <button
+                  key={c.value}
+                  className="rounded-full border border-brand-200 bg-brand-50 px-4 py-1.5 text-sm font-medium text-brand-700 transition hover:bg-brand-100 dark:border-brand-800 dark:bg-brand-900/30 dark:text-brand-300 dark:hover:bg-brand-900/60"
+                  onClick={() => void assistant.sendText(c.value)}
+                >
+                  {t(c.key, uiLang)}
+                </button>
+              ))}
+              <button
+                className="rounded-full border border-slate-200 px-4 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+                onClick={() => void assistant.sendText("skip")}
+              >
+                {t("skip", uiLang)}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

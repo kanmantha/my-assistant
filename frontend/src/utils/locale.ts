@@ -133,6 +133,19 @@ const DICT: Record<string, Record<UiLang, string>> = {
   editAppointment: { en: "Edit appointment", hi: "अपॉइंटमेंट संपादित करें", te: "అపాయింట్‌మెంట్ సవరించండి" },
   deleteAppointment: { en: "Delete appointment", hi: "अपॉइंटमेंट हटाएं", te: "అపాయింట్‌మెంట్ తొలగించండి" },
   deleteAppointmentTitle: { en: "Delete appointment?", hi: "अपॉइंटमेंट हटाएं?", te: "అపాయింట్‌మెంట్ తొలగించాలా?" },
+  monthView: { en: "Month", hi: "महीना", te: "నెల" },
+  yearView: { en: "Year", hi: "वर्ष", te: "సంవత్సరం" },
+  skip: { en: "Skip", hi: "छोड़ें", te: "వదిలేయి" },
+  pickDate: { en: "Pick a date", hi: "तारीख चुनें", te: "తేదీ ఎంచుకోండి" },
+  pickCategory: { en: "Choose a category", hi: "श्रेणी चुनें", te: "వర్గాన్ని ఎంచుకోండి" },
+  categoryWork: { en: "Work", hi: "काम", te: "పని" },
+  categoryPersonal: { en: "Personal", hi: "व्यक्तिगत", te: "వ్యక్తిగత" },
+  categoryShopping: { en: "Shopping", hi: "खरीदारी", te: "షాపింగ్" },
+  categoryStudy: { en: "Study", hi: "पढ़ाई", te: "చదువు" },
+  categoryHealth: { en: "Health", hi: "स्वास्थ्य", te: "ఆరోగ్యం" },
+  categoryFinance: { en: "Finance", hi: "वित्त", te: "ఫైనాన్స్" },
+  categoryTravel: { en: "Travel", hi: "यात्रा", te: "ప్రయాణం" },
+  categoryOther: { en: "Other", hi: "अन्य", te: "ఇతర" },
 
   // ---------- Confirmation dialog (shared) ----------
   deleteConfirm: {

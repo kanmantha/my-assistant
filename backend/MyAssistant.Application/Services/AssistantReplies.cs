@@ -50,6 +50,27 @@ public static class AssistantReplies
         _ => "Sure, what task should I add?"
     };
 
+    public static string AskMeetingTitle(string lang) => lang switch
+    {
+        "hi-IN" => "ठीक है, मीटिंग का नाम क्या होगा?",
+        "te-IN" => "సరే, మీటింగ్ పేరు ఏమిటి?",
+        _ => "Sure, what should I call this meeting?"
+    };
+
+    public static string AskDate(string lang) => lang switch
+    {
+        "hi-IN" => "ठीक है, किस तारीख के लिए? आप 'छोड़ें' कह सकते हैं।",
+        "te-IN" => "సరే, ఏ తేదీకి? మీరు 'వదిలేయండి' అని చెప్పవచ్చు.",
+        _ => "Sure, for what date? You can say 'skip' if none."
+    };
+
+    public static string AskCategory(string lang) => lang switch
+    {
+        "hi-IN" => "किस श्रेणी में सेव करूँ? Work, Personal, या Shopping? आप 'छोड़ें' भी कह सकते हैं।",
+        "te-IN" => "ఏ కేటగిరీలో సేవ్ చేయాలి? Work, Personal, లేదా Shopping? మీరు 'వదిలేయండి' అని కూడా చెప్పవచ్చు.",
+        _ => "Which category should I save it under? Work, Personal, or Shopping? You can also say 'skip'."
+    };
+
     public static string Cancelled(string lang) => lang switch
     {
         "hi-IN" => "ठीक है, मैंने वह क्रिया रद्द कर दी है।",
