@@ -73,15 +73,15 @@ public static class Parser
         }
 
         // Notes (checked before appointments — "take a note about meeting" is a note, not an appointment)
-        if (ctx.HasAny("note", "notes", "नोट", "గమనిక"))
+        if (ctx.HasAny("note", "notes", "नोट", "గమనిక", "remember", "याद", "గుర్తుంచుకో"))
         {
-            if (ctx.HasAny("delete", "remove", "हटाओ", "తొలగించు"))
+            if (ctx.HasAny("delete", "remove", "हटाओ", "తొలగించు", "trash", "dump", "get rid"))
             {
                 result.Intent = AssistantIntents.DeleteNote;
                 result.Title = ctx.ExtractTitle();
                 return result;
             }
-            if (ctx.HasAny("show", "list", "search", "दिखाओ", "చూపించు"))
+            if (ctx.HasAny("show", "list", "search", "दिखाओ", "చూపించు", "all", "every"))
             {
                 result.Intent = AssistantIntents.SearchNotes;
                 result.Query = ctx.ExtractQuery() ?? ctx.ExtractTitle();
@@ -95,21 +95,23 @@ public static class Parser
         }
 
         // Tasks (checked before appointments — "create a task for meeting" is a task, not an appointment)
-        if (ctx.HasAny("task", "tasks", "to-do", "todo", "काम", "కార్యం", "పని", "టాస్క్"))
+        if (ctx.HasAny("task", "tasks", "to-do", "todo", "काम", "కార్యం", "పని", "టాస్క్",
+            "i need to", "i have to", "i must", "got to", "need to do"))
         {
-            if (ctx.HasAny("complete", "mark as done", "finish", "completed", "as done", "done", "पूरा", "పూర్తి"))
+            if (ctx.HasAny("complete", "mark as done", "finish", "completed", "as done", "done",
+                "पूरा", "పూర్తి", "cross off", "tick off", "achieve", "achieved"))
             {
                 result.Intent = AssistantIntents.CompleteTask;
                 result.Title = ctx.ExtractTitle();
                 return result;
             }
-            if (ctx.HasAny("delete", "remove", "हटाओ", "తొలగించు"))
+            if (ctx.HasAny("delete", "remove", "हटाओ", "తొలగించు", "trash", "dump", "get rid"))
             {
                 result.Intent = AssistantIntents.DeleteTask;
                 result.Title = ctx.ExtractTitle();
                 return result;
             }
-            if (ctx.HasAny("show", "list", "my", "मेरे", "జాబితా"))
+            if (ctx.HasAny("show", "list", "my", "मेरे", "జాబితా", "all", "pending", "every"))
             {
                 result.Intent = AssistantIntents.ListTasks;
                 return result;
@@ -124,20 +126,24 @@ public static class Parser
         }
 
         // Appointments / meetings
-        if (ctx.HasAny("appointment", "appointments", "meeting", "meetings", "schedule a", "book", "अपॉइंटमेंट", "మీటింగ్", "అపాయింట్మెంట్"))
+        if (ctx.HasAny("appointment", "appointments", "meeting", "meetings", "schedule a", "book",
+            "अपॉइंटमेंट", "మీటింగ్", "అపాయింట్మెంట్", "call", "conference", "interview",
+            "plan a", "arrange", "set meeting", "set appointment"))
         {
-            if (ctx.HasAny("show", "list", "my", "दिखाओ", "చూపించు"))
+            if (ctx.HasAny("show", "list", "my", "दिखाओ", "చూపించు", "all", "every",
+                "today", "tomorrow", "upcoming", "calendar", "schedule"))
             {
                 result.Intent = AssistantIntents.ListAppointments;
                 return result;
             }
-            if (ctx.HasAny("delete", "cancel the meeting", "remove", "हटाओ", "రద్దు", "తొలగించు"))
+            if (ctx.HasAny("delete", "cancel the meeting", "remove", "हटाओ", "రద్దు",
+                "తొలగించు", "get rid", "dump"))
             {
                 result.Intent = AssistantIntents.DeleteAppointment;
                 result.Title = ctx.ExtractTitle();
                 return result;
             }
-            if (ctx.HasAny("update", "reschedule", "change", "बदलो", "మార్చు"))
+            if (ctx.HasAny("update", "reschedule", "change", "बदलो", "మార్చు", "modify", "edit", "move"))
             {
                 result.Intent = AssistantIntents.UpdateAppointment;
                 result.Title = ctx.ExtractTitle();
@@ -154,9 +160,11 @@ public static class Parser
         }
 
         // Schedule queries
-        if (ctx.HasAny("schedule", "शेड्यूल", "షెడ్యూల్"))
+        if (ctx.HasAny("schedule", "शेड्यूल", "షెడ్యూల్", "calendar", "agenda",
+            "what do i have", "what's on", "what's my day", "how does my day look"))
         {
-            if (ctx.HasAny("today", "आज", "ఈరోజు", "ఈ రోజు"))
+            if (ctx.HasAny("today", "आज", "ఈరోజు", "ఈ రోజు", "this morning", "this afternoon",
+                "this evening", "day like"))
                 result.Intent = AssistantIntents.GetTodaySchedule;
             else if (ctx.HasAny("tomorrow", "कल", "రేపు"))
                 result.Intent = AssistantIntents.GetTomorrowSchedule;
@@ -168,15 +176,17 @@ public static class Parser
         }
 
         // Reminders
-        if (ctx.HasAny("remind", "reminder", "reminders", "याद दिलाना", "याद दिलाओ", "యాద్", "రిమైండర్", "గుర్తు"))
+        if (ctx.HasAny("remind", "reminder", "reminders", "याद दिलाना", "याद दिलाओ",
+            "యాద్", "రిమైండర్", "గుర్తు", "don't forget", "don't let me forget",
+            "remember to", "remember about"))
         {
-            if (ctx.HasAny("delete", "remove", "हटाओ", "తొలగించు"))
+            if (ctx.HasAny("delete", "remove", "हटाओ", "తొలగించు", "cancel", "get rid"))
             {
                 result.Intent = AssistantIntents.DeleteReminder;
                 result.Title = ctx.ExtractTitle();
                 return result;
             }
-            if (ctx.HasAny("update", "change", "बदलो", "మార్చు"))
+            if (ctx.HasAny("update", "change", "बदलो", "మార్చు", "modify", "edit", "reschedule"))
             {
                 result.Intent = AssistantIntents.UpdateReminder;
                 result.Title = ctx.ExtractTitle();
@@ -191,10 +201,18 @@ public static class Parser
         }
 
         // Generic search
-        if (ctx.HasAny("search", "find", "look for", "खोज", "వెతుకు"))
+        if (ctx.HasAny("search", "find", "look for", "खोज", "వెతుకు", "where is", "look up"))
         {
             result.Intent = AssistantIntents.Search;
             result.Query = ctx.ExtractQuery() ?? ctx.ExtractTitle();
+            return result;
+        }
+
+        // Fallback — detect help intent
+        if (ctx.HasAny("help", "what can you do", "what do you do", "how do you work",
+            "commands", "features", "सहायता", "मदद", "సహాయం", "सुविधा", "आदेश"))
+        {
+            result.Intent = AssistantIntents.Help;
             return result;
         }
 

@@ -265,6 +265,75 @@ class _AssistantScreenState extends State<AssistantScreen> {
       return;
     }
 
+    // Today's schedule query
+    if (_isTodayScheduleIntent(lower)) {
+      await _listTodayAppointments();
+      return;
+    }
+
+    // Reminders → send to backend (no confirmation dialog)
+    if (_isReminderIntent(lower)) {
+      assistant.setBusy(true);
+      try {
+        final backend = context.read<BackendClient>();
+        final result = await backend.sendCommand(
+          text: text,
+          language: assistant.language,
+          timezone: 'Asia/Kolkata',
+        );
+        assistant.addAssistantResponse(result);
+        _scrollToBottom();
+        await TtsService.instance.speak(result.responseText ?? 'Done');
+      } on ApiException catch (e) {
+        assistant.addAssistantText('Unable to reach the assistant: ${e.message}');
+        await TtsService.instance.speak('Sorry, I could not reach the server.');
+      } catch (e) {
+        assistant.addAssistantText('Something went wrong: $e');
+        await TtsService.instance.speak('Something went wrong.');
+      } finally {
+        assistant.setBusy(false);
+        _scrollToBottom();
+      }
+      return;
+    }
+
+    // Delete/Update/Complete → send to backend
+    if (_isDeleteIntent(lower) || _isUpdateIntent(lower) || _isCompleteIntent(lower)) {
+      assistant.setBusy(true);
+      try {
+        final backend = context.read<BackendClient>();
+        final result = await backend.sendCommand(
+          text: text,
+          language: assistant.language,
+          timezone: 'Asia/Kolkata',
+        );
+        assistant.addAssistantResponse(result);
+        _scrollToBottom();
+        await TtsService.instance.speak(result.responseText ?? 'Done');
+      } on ApiException catch (e) {
+        assistant.addAssistantText('Unable to reach the assistant: ${e.message}');
+        await TtsService.instance.speak('Sorry, I could not reach the server.');
+      } catch (e) {
+        assistant.addAssistantText('Something went wrong: $e');
+        await TtsService.instance.speak('Something went wrong.');
+      } finally {
+        assistant.setBusy(false);
+        _scrollToBottom();
+      }
+      return;
+    }
+
+    // Help
+    if (_isHelpIntent(lower)) {
+      final msg = 'I can help you with notes, tasks, appointments, and reminders. '
+          'Try saying: "Take a note about project deadline", "Create a task to buy groceries", '
+          '"Schedule meeting with Ram at 3 PM", or "Remind me to call mom tomorrow".';
+      assistant.addAssistantText(msg);
+      _scrollToBottom();
+      await TtsService.instance.speak(msg);
+      return;
+    }
+
     // ─── Fallback: send to backend ──────────────────────────────
     final demoResponse = assistant.demoRespond(text);
     if (demoResponse != null) {
@@ -303,34 +372,89 @@ class _AssistantScreenState extends State<AssistantScreen> {
       lower.contains('take a note') || lower.contains('add note') ||
       lower.contains('note down') || lower.contains('create note') ||
       lower.contains('save note') || lower.contains('write note') ||
+      lower.contains('i need to remember') || lower.contains('put this down') ||
+      lower.contains('remember this') || lower.contains('jot down') ||
+      lower.contains('make a note') || lower.contains('set a note') ||
       lower.startsWith('note ');
 
   bool _isTaskIntent(String lower) =>
       lower.contains('create a task') || lower.contains('add a task') ||
       lower.contains('create task') || lower.contains('add task') ||
       lower.contains('schedule task') || lower.contains('make a task') ||
-      lower.contains('new task');
+      lower.contains('new task') || lower.contains('i need to') ||
+      lower.contains('i have to') || lower.contains('i must') ||
+      lower.contains('got to') || lower.contains('need to do') ||
+      lower.contains('set a task') || lower.contains('set up a task');
 
   bool _isAppointmentIntent(String lower) =>
       lower.contains('schedule meeting') || lower.contains('book appointment') ||
       lower.contains('set up meeting') || lower.contains('create appointment') ||
       lower.contains('add appointment') || lower.contains('schedule appointment') ||
-      lower.contains('new meeting');
+      lower.contains('new meeting') || lower.contains('book a meeting') ||
+      lower.contains('plan a meeting') || lower.contains('arrange a meeting') ||
+      lower.contains('set meeting') || lower.contains('schedule a call') ||
+      lower.contains('set up appointment') || lower.contains('new appointment');
+
+  bool _isDeleteIntent(String lower) =>
+      lower.contains('delete') || lower.contains('remove') ||
+      lower.contains('cancel') || lower.contains('get rid of') ||
+      lower.contains('trash') || lower.contains('dump');
+
+  bool _isUpdateIntent(String lower) =>
+      lower.contains('update') || lower.contains('change') ||
+      lower.contains('modify') || lower.contains('reschedule') ||
+      lower.contains('edit') || lower.contains('move');
+
+  bool _isCompleteIntent(String lower) =>
+      lower.contains('complete') || lower.contains('mark as done') ||
+      lower.contains('finish') || lower.contains('done with') ||
+      lower.contains('cross off') || lower.contains('tick off') ||
+      lower.contains('achieve');
 
   bool _isListAppointmentsIntent(String lower) =>
       lower.contains('what are my appointments') || lower.contains('list appointments') ||
       lower.contains('show appointments') || lower.contains('my appointments') ||
       lower.contains('today\'s appointments') || lower.contains('today appointments') ||
       lower.contains('what meetings') || lower.contains('my meetings') ||
-      lower.contains('show meetings');
+      lower.contains('show meetings') || lower.contains('what\'s on my calendar') ||
+      lower.contains('what\'s my schedule') || lower.contains('what do i have today') ||
+      lower.contains('do i have any meetings') || lower.contains('any meetings today') ||
+      lower.contains('upcoming appointments') || lower.contains('what\'s coming up') ||
+      lower.contains('my schedule today') || lower.contains('today\'s schedule') ||
+      lower.contains('tomorrow\'s schedule') || lower.contains('what\'s tomorrow');
 
   bool _isListNotesIntent(String lower) =>
       lower.contains('show notes') || lower.contains('list notes') ||
-      lower.contains('what are my notes') || lower.contains('my notes');
+      lower.contains('what are my notes') || lower.contains('my notes') ||
+      lower.contains('all my notes') || lower.contains('open notes') ||
+      lower.contains('go to notes') || lower.contains('see my notes') ||
+      lower.contains('how many notes');
 
   bool _isListTasksIntent(String lower) =>
       lower.contains('show tasks') || lower.contains('list tasks') ||
-      lower.contains('what are my tasks') || lower.contains('my tasks');
+      lower.contains('what are my tasks') || lower.contains('my tasks') ||
+      lower.contains('all my tasks') || lower.contains('pending tasks') ||
+      lower.contains('what\'s left to do') || lower.contains('what do i need to do') ||
+      lower.contains('open tasks') || lower.contains('go to tasks') ||
+      lower.contains('see my tasks') || lower.contains('how many tasks');
+
+  bool _isReminderIntent(String lower) =>
+      lower.contains('remind me') || lower.contains('set a reminder') ||
+      lower.contains('create reminder') || lower.contains('add reminder') ||
+      lower.contains('don\'t forget') || lower.contains('don\'t let me forget') ||
+      lower.contains('remember to') || lower.contains('reminder about') ||
+      lower.contains('remind me to') || lower.contains('remind me about');
+
+  bool _isTodayScheduleIntent(String lower) =>
+      lower.contains('what\'s my day like') || lower.contains('what do i have today') ||
+      lower.contains('how does my day look') || lower.contains('what\'s planned for today') ||
+      lower.contains('today\'s agenda') || lower.contains('my day today') ||
+      lower.contains('what\'s on today') || lower.contains('schedule for today');
+
+  bool _isHelpIntent(String lower) =>
+      lower.contains('help') || lower.contains('what can you do') ||
+      lower.contains('what do you do') || lower.contains('how do you work') ||
+      lower.contains('commands') || lower.contains('features');
 
   // ─── Content extractors ─────────────────────────────────────────
 

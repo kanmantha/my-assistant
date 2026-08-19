@@ -48,9 +48,14 @@ public class CommandContext
     public string ExtractTitle()
     {
         var text = Text;
-        var m = Regex.Match(text, "(?:to |to call |call |to complete |complete |to buy |buy |kall|for )([a-z0-9 ,.!?'-]+)");
-        // prefer the content captured after the intent verb, then strip keywords
-        if (m.Success) text = m.Groups[1].Value;
+        // Handle natural phrases: "i need to call bank", "put this down as meeting notes", etc.
+        var natural = Regex.Match(text, @"(?:i need to|i have to|i must|got to|need to|put this down as|write down|jot down|remember)\s+([a-z0-9 ,.!?'-]+)");
+        if (natural.Success) text = natural.Groups[1].Value;
+        else
+        {
+            var m = Regex.Match(text, "(?:to |to call |call |to complete |complete |to buy |buy |kall|for )([a-z0-9 ,.!?'-]+)");
+            if (m.Success) text = m.Groups[1].Value;
+        }
         foreach (var s in StopWords)
             text = Regex.Replace(text, $@"\b{Regex.Escape(s)}\b", " ");
 
@@ -64,7 +69,6 @@ public class CommandContext
 
         if (string.IsNullOrEmpty(text))
         {
-            // fallback: longest words that aren't stop words or time fragments
             var tokens = Text.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries)
                 .Where(t => t.Length > 3 && !IsStop(t) && !t.Any(char.IsDigit)).ToList();
             text = string.Join(" ", tokens);
@@ -76,7 +80,8 @@ public class CommandContext
     public string ExtractContent()
     {
         var text = Text;
-        var markers = new[] { "note:", "note that", "note :", "write", "take a note", "नोट लो", "నోట్ తీసుకో" };
+        var markers = new[] { "note:", "note that", "note :", "write", "take a note",
+            "नोट लो", "నోట్ తీసుకో", "put this down", "jot down", "remember", "write down" };
         foreach (var mk in markers)
         {
             var idx = text.IndexOf(mk, StringComparison.OrdinalIgnoreCase);
@@ -86,7 +91,8 @@ public class CommandContext
                 break;
             }
         }
-        foreach (var s in new[] { "assistant", "please", "add", "make", "save", "a ", "the " })
+        foreach (var s in new[] { "assistant", "please", "add", "make", "save", "a ", "the ",
+            "i need to", "i have to", "i must", "got to" })
             text = text.Replace(" " + s, " ");
         return text.Trim().Trim(' ', ':', ',', '.', '!', '?');
     }
@@ -171,7 +177,21 @@ public static class DateTimeResolver
 
         if (Contains(t, "next week", "अगले हफ्ते", "వచ్చే వారం")) return now.AddDays(7).ToString("yyyy-MM-dd");
 
-        // "in 30 minutes", "in 2 hours"
+        // "in an hour", "in 2 hours", "in half an hour", "in 30 minutes", "in 15 mins"
+        var inHourWord = Regex.Match(t, @"in (an?|one|two|three|four|five|six) (hour|hours)");
+        if (inHourWord.Success)
+        {
+            var word = inHourWord.Groups[1].Value.ToLowerInvariant();
+            var n = word is "an" or "one" ? 1 : word == "two" ? 2 : word == "three" ? 3
+                : word == "four" ? 4 : word == "five" ? 5 : 6;
+            var dt = now.AddHours(n);
+            return dt.ToString("yyyy-MM-dd");
+        }
+        var inHalfHour = Regex.Match(t, @"in half an? hour");
+        if (inHalfHour.Success)
+        {
+            return now.AddMinutes(30).ToString("yyyy-MM-dd");
+        }
         var inMatch = Regex.Match(t, @"in (\d+) (minutes?|minute|hours?|hrs?|hour)");
         if (inMatch.Success)
         {
@@ -194,6 +214,15 @@ public static class DateTimeResolver
             try { return new DateTime(y, mon, day).ToString("yyyy-MM-dd"); } catch { }
         }
 
+        // "3rd of next month", "15th of next month"
+        var nthOfMonth = Regex.Match(t, @"(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?next\s+month");
+        if (nthOfMonth.Success)
+        {
+            var day = int.Parse(nthOfMonth.Groups[1].Value);
+            var nextMonth = now.AddMonths(1);
+            try { return new DateTime(nextMonth.Year, nextMonth.Month, day).ToString("yyyy-MM-dd"); } catch { }
+        }
+
         // relative with implicit "tomorrow morning"
         if (Contains(t, "morning", "सुबह", "ఉదయం") && Contains(t, "tomorrow", "कल", "రేపు"))
             return now.AddDays(1).ToString("yyyy-MM-dd");
@@ -206,7 +235,21 @@ public static class DateTimeResolver
         var t = ctx.Text;
         var now = TimeZoneInfo.ConvertTime(DateTime.UtcNow, Ist);
 
-        // "in 30 minutes" / "in 2 hours"
+        // "in an hour", "in 2 hours", "in half an hour", "in 30 minutes"
+        var inHourWord = Regex.Match(t, @"in (an?|one|two|three|four|five|six) (hour|hours)");
+        if (inHourWord.Success)
+        {
+            var word = inHourWord.Groups[1].Value.ToLowerInvariant();
+            var n = word is "an" or "one" ? 1 : word == "two" ? 2 : word == "three" ? 3
+                : word == "four" ? 4 : word == "five" ? 5 : 6;
+            var dt = now.AddHours(n);
+            return dt.ToString("HH:mm");
+        }
+        var inHalfHour = Regex.Match(t, @"in half an? hour");
+        if (inHalfHour.Success)
+        {
+            return now.AddMinutes(30).ToString("HH:mm");
+        }
         var inMatch = Regex.Match(t, @"in (\d+) (minutes?|minute|hours?|hrs?|hour)");
         if (inMatch.Success)
         {
@@ -308,8 +351,9 @@ public static class PriorityParser
 {
     public static string? Parse(CommandContext ctx)
     {
-        if (ctx.HasAny("urgent", "तुरंत", "అత్యవసరం")) return "Urgent";
-        if (ctx.HasAny("high", "high priority", "जरूरी", "అధిక")) return "High";
+        if (ctx.HasAny("critical", "क्रिटिकल", "అత్యవసరం", "blocker")) return "Critical";
+        if (ctx.HasAny("urgent", "तुरंत")) return "Urgent";
+        if (ctx.HasAny("high", "high priority", "जरूरी", "అధిక", "important", "महत्वपूर्ण", "ముఖ్యమైన")) return "High";
         if (ctx.HasAny("low", "कम", "తక్కువ")) return "Low";
         return "Medium";
     }
