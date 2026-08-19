@@ -10,6 +10,7 @@ import 'dashboard_screen.dart';
 import 'notes_screen.dart';
 import 'settings_screen.dart';
 import 'tasks_screen.dart';
+import 'today_screen.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -24,6 +25,7 @@ class _HomeShellState extends State<HomeShell> {
 
   static const _screens = [
     DashboardScreen(),
+    TodayScreen(),
     TasksScreen(),
     AssistantScreen(),
     NotesScreen(),
@@ -41,7 +43,7 @@ class _HomeShellState extends State<HomeShell> {
   void _handleWake() {
     if (!mounted) return;
     context.read<AssistantProvider>().requestAutoListen();
-    setState(() => _index = 2);
+    setState(() => _index = 3);
   }
 
   @override
@@ -128,12 +130,14 @@ class _HomeShellState extends State<HomeShell> {
         onDestinationSelected: (i) {
           setState(() => _index = i);
           // Reload data when switching to a CRUD tab
-          if (i == 1) context.read<TasksState>().load();
-          if (i == 3) context.read<NotesState>().load();
-          if (i == 4) context.read<AppointmentsState>().load();
+          if (i == 1) context.read<AppointmentsState>().load();
+          if (i == 2) context.read<TasksState>().load();
+          if (i == 4) context.read<NotesState>().load();
+          if (i == 5) context.read<AppointmentsState>().load();
         },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
+          NavigationDestination(icon: Icon(Icons.today_outlined), selectedIcon: Icon(Icons.today), label: 'Today'),
           NavigationDestination(icon: Icon(Icons.checklist_outlined), selectedIcon: Icon(Icons.checklist), label: 'Tasks'),
           NavigationDestination(icon: Icon(Icons.auto_awesome_outlined), selectedIcon: Icon(Icons.auto_awesome), label: 'Assistant'),
           NavigationDestination(icon: Icon(Icons.note_alt_outlined), selectedIcon: Icon(Icons.note_alt), label: 'Notes'),
@@ -143,7 +147,7 @@ class _HomeShellState extends State<HomeShell> {
       ),
       floatingActionButton: wake.running
           ? FloatingActionButton.small(
-              onPressed: () => setState(() => _index = 2),
+              onPressed: () => setState(() => _index = 3),
               tooltip: 'Say "Hey Assistant"',
               backgroundColor: wake.listening
                   ? Colors.green.shade100

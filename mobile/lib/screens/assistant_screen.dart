@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -44,7 +45,6 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   _VoiceState _voiceState = _VoiceState.idle;
   String _pendingCommand = '';
-  bool _fromVoiceConfirm = false;
 
   @override
   void initState() {
@@ -148,9 +148,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
         a.contains('sure') || a.contains('ok') || a.contains('confirm') ||
         a.contains('save') || a.contains('correct') || a.contains('right') ||
         a.contains('haan') || a.contains('acha')) {
-      _fromVoiceConfirm = true;
       await _processCommand(_pendingCommand);
-      _fromVoiceConfirm = false;
     } else {
       assistant.addAssistantText('Okay, cancelled.');
       await TtsService.instance.speak('Okay, cancelled.');
@@ -199,34 +197,29 @@ class _AssistantScreenState extends State<AssistantScreen> {
       }
 
       ConfirmationResult? result;
-      if (_fromVoiceConfirm) {
-        // Voice already confirmed — save directly without UI dialog
-        result = ConfirmationResult(
-          type: detectedType,
-          title: title,
-          content: content,
-          priority: priority ?? 'Medium',
-          dateTime: dateTime,
-          location: location,
-        );
-      } else {
-        // Text input — show confirmation dialog for editing
-        result = await showModalBottomSheet<ConfirmationResult>(
-          context: context,
-          isScrollControlled: true,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          builder: (_) => ConfirmationDialog(
-            initialType: detectedType,
-            initialTitle: title,
-            initialContent: content,
-            initialPriority: priority,
-            initialDateTime: dateTime,
-            initialLocation: location,
-          ),
-        );
-      }
+      // Always show the confirmation dialog with calendar
+      // Echo the detected entity type first
+      final echoMsg = 'I\'ll create a $detectedType called "$title". Please review the details.';
+      assistant.addAssistantText(echoMsg);
+      _scrollToBottom();
+      await TtsService.instance.speak(echoMsg);
+
+      if (!mounted) return;
+      result = await showModalBottomSheet<ConfirmationResult>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (_) => ConfirmationDialog(
+          initialType: detectedType,
+          initialTitle: title,
+          initialContent: content,
+          initialPriority: priority,
+          initialDateTime: dateTime,
+          initialLocation: location,
+        ),
+      );
 
       if (result == null) {
         assistant.addAssistantText('Cancelled.');
@@ -1171,15 +1164,24 @@ class _AssistantScreenState extends State<AssistantScreen> {
       return a.startDateTime.year == now.year &&
           a.startDateTime.month == now.month &&
           a.startDateTime.day == now.day;
-    }).toList();
+    }).toList()
+      ..sort((a, b) => a.startDateTime.compareTo(b.startDateTime));
 
-    String msg;
     if (today.isEmpty) {
-      msg = 'You have no appointments today.';
-    } else {
-      final items = today.map((a) =>
-          '${a.title} at ${a.startDateTime.hour}:${a.startDateTime.minute.toString().padLeft(2, '0')}').join(', ');
-      msg = 'Today you have ${today.length} appointment${today.length > 1 ? 's' : ''}: $items';
+      final msg = 'You have no appointments scheduled for today.';
+      assistant.addAssistantText(msg);
+      _scrollToBottom();
+      await TtsService.instance.speak(msg);
+      return;
+    }
+
+    final timeFmt = DateFormat('h:mm a');
+    var msg = 'Today you have ${today.length} event${today.length > 1 ? 's' : ''}. ';
+    for (var i = 0; i < today.length; i++) {
+      final a = today[i];
+      final timeStr = timeFmt.format(a.startDateTime);
+      final locationPart = a.location.isNotEmpty ? ' at ${a.location}' : '';
+      msg += 'Number ${i + 1}: ${a.title}, scheduled for $timeStr$locationPart. ';
     }
 
     assistant.addAssistantText(msg);
