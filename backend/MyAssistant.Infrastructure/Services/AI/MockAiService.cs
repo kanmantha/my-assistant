@@ -73,7 +73,7 @@ public static class Parser
         }
 
         // Notes (checked before appointments — "take a note about meeting" is a note, not an appointment)
-        if (ctx.HasAny("note", "नोट", "గమనిక"))
+        if (ctx.HasAny("note", "notes", "नोट", "గమనిక"))
         {
             if (ctx.HasAny("delete", "remove", "हटाओ", "తొలగించు"))
             {
@@ -95,7 +95,7 @@ public static class Parser
         }
 
         // Tasks (checked before appointments — "create a task for meeting" is a task, not an appointment)
-        if (ctx.HasAny("task", "to-do", "todo", "काम", "కార్యం", "పని", "టాస్క్"))
+        if (ctx.HasAny("task", "tasks", "to-do", "todo", "काम", "కార్యం", "పని", "టాస్క్"))
         {
             if (ctx.HasAny("complete", "mark as done", "finish", "completed", "as done", "done", "पूरा", "పూర్తి"))
             {
@@ -124,8 +124,13 @@ public static class Parser
         }
 
         // Appointments / meetings
-        if (ctx.HasAny("appointment", "meeting", "schedule a", "book", "अपॉइंटमेंट", "మీటింగ్", "అపాయింట్మెంట్"))
+        if (ctx.HasAny("appointment", "appointments", "meeting", "meetings", "schedule a", "book", "अपॉइंटमेंट", "మీటింగ్", "అపాయింట్మెంట్"))
         {
+            if (ctx.HasAny("show", "list", "my", "दिखाओ", "చూపించు"))
+            {
+                result.Intent = AssistantIntents.ListAppointments;
+                return result;
+            }
             if (ctx.HasAny("delete", "cancel the meeting", "remove", "हटाओ", "రద్దు", "తొలగించు"))
             {
                 result.Intent = AssistantIntents.DeleteAppointment;
@@ -163,7 +168,7 @@ public static class Parser
         }
 
         // Reminders
-        if (ctx.HasAny("remind", "reminder", "याद दिलाना", "याद दिलाओ", "యాద్", "రిమైండర్", "గుర్తు"))
+        if (ctx.HasAny("remind", "reminder", "reminders", "याद दिलाना", "याद दिलाओ", "యాద్", "రిమైండర్", "గుర్తు"))
         {
             if (ctx.HasAny("delete", "remove", "हटाओ", "తొలగించు"))
             {
