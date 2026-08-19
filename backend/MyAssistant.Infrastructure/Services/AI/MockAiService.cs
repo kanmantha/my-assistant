@@ -48,12 +48,12 @@ public static class Parser
         ctx.StripWakeWord();
 
         // Confirm / cancel / help
-        if (ctx.Short && ctx.HasAny("yes", "yeah", "sure", "हाँ", "ठीक है", "అవును", "ఔను"))
+        if (ctx.Short && ctx.HasWord("yes", "yeah", "sure", "हाँ", "ठीक है", "అవును", "ఔను"))
         {
             result.Intent = AssistantIntents.Confirm;
             return result;
         }
-        if (ctx.Short && ctx.HasAny("no", "nahi", "नहीं", "కాదు"))
+        if (ctx.Short && ctx.HasWord("no", "nahi", "नहीं", "కాదు"))
         {
             result.Intent = AssistantIntents.Cancel;
             return result;

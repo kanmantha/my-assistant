@@ -37,6 +37,13 @@ public class CommandContext
         return false;
     }
 
+    public bool HasWord(params string[] terms)
+    {
+        foreach (var t in terms)
+            if (Regex.IsMatch(Text, $@"\b{Regex.Escape(t)}\b", RegexOptions.IgnoreCase)) return true;
+        return false;
+    }
+
     /// <summary>Extract a meaningful title for the entity, stripping intent/date/time keywords.</summary>
     public string ExtractTitle()
     {
