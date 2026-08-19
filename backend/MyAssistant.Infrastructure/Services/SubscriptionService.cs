@@ -51,7 +51,7 @@ public class SubscriptionService : ISubscriptionService
             Usage: usage);
     }
 
-    public async Task<SubscriptionInfo> UpgradeAsync(Guid userId, Guid planId, string billingPeriod)
+    public async Task<SubscriptionInfo> UpgradeAsync(Guid userId, Guid planId, string billingPeriod, string provider = "mock")
     {
         var plan = await _uow.Plans.GetByIdAsync(planId) ?? throw new AppError("Plan not found", 404, "PLAN_NOT_FOUND");
         var sub = await _uow.Subscriptions.FirstOrDefaultAsync(s => s.UserId == userId);
@@ -68,7 +68,7 @@ public class SubscriptionService : ISubscriptionService
                 StartDate = now,
                 CurrentPeriodEnd = now.AddMonths(1),
                 RenewalDate = now.AddMonths(1),
-                Provider = "mock"
+                Provider = provider
             };
             await _uow.Subscriptions.AddAsync(sub);
         }

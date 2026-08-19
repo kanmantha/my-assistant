@@ -2,88 +2,76 @@ import 'dart:async';
 import 'dart:developer' as dev;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:speech_to_text/speech_to_text.dart';
 
-/// Continuous on-device wake-word listening built on [SpeechToText].
-///
-/// Listens in short windows and restarts when a window produces no wake
-/// phrase. Uses the same wake phrases as the backend parser (en, hi, te).
+import 'native_speech_service.dart';
+import 'speech_service.dart';
+
+/// Continuous on-device wake-word listening built on the native speech channel.
+/// Falls back to the speech_to_text plugin on web / iOS.
 class WakeWordService {
-  WakeWordService._() : _speech = SpeechToText();
+  WakeWordService._();
 
   static final WakeWordService instance = WakeWordService._();
 
-  final SpeechToText _speech;
-  bool _initialized = false;
   bool _running = false;
   bool _listening = false;
-  Completer<bool>? _currentListen;
 
-  /// Wake phrases — matched against partial + final results.
   static const List<String> _phrases = [
-    'hey assistant',
-    'hi assistant',
-    'okay assistant',
-    'ok assistant',
-    'hey asistant',
-    'hey assistance',
-    'hey assistent',
-    'hi asistant',
-    'hi assistance',
-    'hi assistent',
-    'ok asistant',
-    'okay asistant',
-    'assistant',
-    'एसिस्टेंट',
-    'असिस्टेंट',
-    'అసిస్టెంట్',
+    'hey assistant', 'hi assistant', 'okay assistant', 'ok assistant',
+    'hey asistant', 'hey assistance', 'hey assistent',
+    'hi asistant', 'hi assistance', 'hi assistent',
+    'ok asistant', 'okay asistant', 'assistant',
   ];
 
   bool get isRunning => _running;
   bool get isListening => _listening;
-  bool get isAvailable => _initialized;
+  bool get isAvailable => !kIsWeb && NativeSpeechService.instance.isSupported;
   bool get isWeb => kIsWeb;
 
   Future<bool> initialize() async {
-    if (_initialized) return true;
-    try {
-      _initialized = await _speech.initialize(
-        onError: (err) {
-          dev.log('[WakeWord] onError: ${err.errorMsg} permanent=${err.permanent}');
-          // Never stop the loop on errors — just mark not listening so the
-          // next window can retry. Only truly permanent errors (mic blocked)
-          // will naturally fail every window until the user re-enables.
-          _listening = false;
-        },
-        onStatus: (status) {
-          if (status == SpeechToText.notListeningStatus ||
-              status == SpeechToText.doneStatus) {
-            _listening = false;
-          }
-        },
-        debugLogging: false,
-      );
-    } catch (e) {
-      dev.log('[WakeWord] initialize failed: $e');
-      _initialized = false;
-    }
-    dev.log('[WakeWord] initialized=$_initialized');
-    return _initialized;
+    if (kIsWeb) return SpeechService.instance.init();
+    return NativeSpeechService.instance.isAvailable();
   }
 
-  /// Force re-initialization after repeated failures.
-  Future<void> _reinitialize() async {
-    _initialized = false;
-    _listening = false;
-    try { await _speech.cancel(); } catch (_) {}
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    await initialize();
+  Future<String> testListen() async {
+    if (kIsWeb) return _testListenFallback();
+
+    final available = await NativeSpeechService.instance.isAvailable();
+    if (!available) return '[Speech engine not available on this device]';
+
+    final result = await NativeSpeechService.instance.listenOnce(
+      language: 'en-IN',
+      timeout: const Duration(seconds: 8),
+    );
+    return result ?? '[No speech detected]';
   }
 
-  /// Starts the wake-word loop. [onWake] fires when a wake phrase is heard.
+  Future<String> _testListenFallback() async {
+    final ok = await SpeechService.instance.init();
+    if (!ok) return '[Speech engine unavailable]';
+
+    final completer = Completer<String>();
+    final started = await SpeechService.instance.start(
+      onResult: (r) {
+        if (r.finalResult) completer.complete(r.recognizedWords);
+      },
+      listenFor: const Duration(seconds: 8),
+      pauseFor: const Duration(seconds: 5),
+    );
+    if (!started) return '[Could not start listening]';
+
+    final result = await completer.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => '[No response]',
+    );
+    await SpeechService.instance.stop();
+    return result.isEmpty ? '[No speech detected]' : result;
+  }
+
   Future<void> start({required void Function() onWake}) async {
     if (_running) return;
-    if (!await initialize()) return;
+    final ok = await initialize();
+    if (!ok) return;
     _running = true;
     dev.log('[WakeWord] loop started');
     _loop(onWake);
@@ -99,69 +87,71 @@ class WakeWordService {
         failCount++;
       }
       if (_running) {
-        // Short pause between windows; longer after a successful wake.
-        await Future<void>.delayed(hit
+        // On failure, wait longer to give the SpeechRecognizer time to reset.
+        final delay = hit
             ? const Duration(milliseconds: 1500)
-            : const Duration(milliseconds: 400));
+            : failCount < 3
+                ? const Duration(seconds: 3)
+                : const Duration(seconds: 5);
+        await Future<void>.delayed(delay);
       }
-      // After many consecutive failures, try re-initializing the speech engine.
-      if (failCount > 20 && _running) {
-        dev.log('[WakeWord] re-initializing after $failCount failures');
+      if (failCount > 10 && _running) {
+        dev.log('[WakeWord] re-init after $failCount failures');
         failCount = 0;
-        await _reinitialize();
+        await NativeSpeechService.instance.stopListening();
+        await Future<void>.delayed(const Duration(seconds: 3));
       }
     }
   }
 
-  /// Listens for one window. Returns true when a wake phrase was detected.
   Future<bool> _listenOnce(void Function() onWake) async {
     if (!_running) return false;
-    final completer = Completer<bool>();
-    _currentListen = completer;
     _listening = true;
 
-    try {
-      await _speech.listen(
-        onResult: (result) {
-          if (completer.isCompleted) return;
-          final words = result.recognizedWords.toLowerCase().trim();
-          if (words.isNotEmpty) {
-            dev.log('[WakeWord] heard: "$words" final=${result.finalResult}');
-            if (_matches(words)) {
-              dev.log('[WakeWord] MATCH detected!');
-              completer.complete(true);
-              return;
-            }
-          }
-          if (result.finalResult) {
-            completer.complete(false);
-          }
-        },
-        listenOptions: SpeechListenOptions(
-          partialResults: true,
-          listenMode: ListenMode.search,
-          listenFor: const Duration(seconds: 15),
-          pauseFor: const Duration(seconds: 8),
-          cancelOnError: false,
-        ),
-      );
-    } catch (e) {
-      dev.log('[WakeWord] listen exception: $e');
-      if (!completer.isCompleted) completer.complete(false);
+    if (kIsWeb) return _listenOnceFallback(onWake);
+
+    // Native Android path.
+    final completer = Completer<bool>();
+
+    StreamSubscription<dynamic>? sub;
+    sub = NativeSpeechService.instance.onEvent.listen((event) {
+      if (completer.isCompleted) return;
+      if (event is NativeSpeechResultEvent) {
+        final words = event.text.toLowerCase().trim();
+        dev.log('[WakeWord] heard: "$words" final=${event.isFinal}');
+        if (words.isNotEmpty && _matches(words)) {
+          dev.log('[WakeWord] MATCH!');
+          completer.complete(true);
+          return;
+        }
+        if (event.isFinal) {
+          completer.complete(false);
+        }
+      } else if (event is NativeSpeechErrorEvent) {
+        dev.log('[WakeWord] error: ${event.error}');
+        if (!completer.isCompleted) completer.complete(false);
+      }
+    });
+
+    final started = await NativeSpeechService.instance.startListening(
+      language: 'en-IN',
+    );
+    if (!started) {
+      sub.cancel();
+      _listening = false;
+      return false;
     }
 
-    // Safety net in case the platform never reports window end.
     final hit = await completer.future.timeout(
-      const Duration(seconds: 20),
+      const Duration(seconds: 18),
       onTimeout: () {
         dev.log('[WakeWord] window timed out');
         return false;
       },
     );
 
-    try {
-      if (_speech.isListening) await _speech.stop();
-    } catch (_) {}
+    sub.cancel();
+    await NativeSpeechService.instance.stopListening();
     _listening = false;
 
     if (hit && _running) {
@@ -170,35 +160,55 @@ class WakeWordService {
     return hit;
   }
 
-  bool _matches(String words) {
-    final compact = words.replaceAll(RegExp(r'[^a-z\u0900-\u097F\u0C00-\u0C7F]'), '');
+  Future<bool> _listenOnceFallback(void Function() onWake) async {
+    // speech_to_text fallback for web/iOS.
+    final ok = await SpeechService.instance.init();
+    if (!ok) { _listening = false; return false; }
 
-    // Direct match against all known phrases.
+    final completer = Completer<bool>();
+    final started = await SpeechService.instance.start(
+      onResult: (r) {
+        if (completer.isCompleted) return;
+        final words = r.recognizedWords.toLowerCase().trim();
+        if (words.isNotEmpty && _matches(words)) {
+          completer.complete(true);
+          return;
+        }
+        if (r.finalResult) completer.complete(false);
+      },
+      listenFor: const Duration(seconds: 12),
+      pauseFor: const Duration(seconds: 8),
+    );
+    if (!started) { _listening = false; return false; }
+
+    final hit = await completer.future.timeout(
+      const Duration(seconds: 18),
+      onTimeout: () => false,
+    );
+
+    await SpeechService.instance.stop();
+    _listening = false;
+
+    if (hit && _running) onWake();
+    return hit;
+  }
+
+  bool _matches(String words) {
+    final compact = words.replaceAll(RegExp(r'[^a-z]'), '');
+
     for (final p in _phrases) {
-      final compactPhrase = p.replaceAll(' ', '');
-      if (words.contains(p) || compact.contains(compactPhrase)) return true;
+      if (words.contains(p) || compact.contains(p.replaceAll(' ', ''))) return true;
     }
 
-    // Fuzzy: the word "assistant" can be mis-transcribed in many ways.
-    // Check if any word in the result starts with "ass" or contains "ist".
     final wordList = compact.split(RegExp(r'\s+'));
-    for (final w in wordList) {
-      if (w.startsWith('ass') || w.contains('ist') || w == 'a') {
-        // Found something that looks like "assistant" — check if there's
-        // a preceding trigger word ("hey", "hi", "ok", "okay").
-        final idx = wordList.indexOf(w);
-        if (idx > 0) {
-          final prev = wordList[idx - 1];
-          if (prev == 'hey' || prev == 'hi' || prev == 'ok' || prev == 'okay' || prev == 'a') {
-            return true;
-          }
-        }
-        // Standalone "assistant" (any transcription containing "ist").
-        if (w.length >= 5) return true;
+    for (var i = 0; i < wordList.length; i++) {
+      final w = wordList[i];
+      if (w.startsWith('ass') || (w.contains('ist') && w.length >= 5)) {
+        if (i > 0 && ['hey', 'hi', 'ok', 'okay', 'a'].contains(wordList[i - 1])) return true;
+        return true;
       }
     }
 
-    // Very loose: if the entire text contains "hey" + any "st" nearby.
     if (compact.contains('hey') && compact.contains('st')) return true;
     if (compact.contains('hi') && compact.contains('st') && compact.length < 20) return true;
 
@@ -208,13 +218,11 @@ class WakeWordService {
   Future<void> stop() async {
     _running = false;
     _listening = false;
-    final completer = _currentListen;
-    if (completer != null && !completer.isCompleted) {
-      completer.complete(false);
+    if (!kIsWeb) {
+      await NativeSpeechService.instance.stopListening();
+    } else {
+      await SpeechService.instance.release();
     }
-    try {
-      if (_speech.isListening) await _speech.stop();
-    } catch (_) {}
     dev.log('[WakeWord] stopped');
   }
 }

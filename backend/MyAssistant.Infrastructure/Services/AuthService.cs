@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using MyAssistant.Application.Common;
 using MyAssistant.Application.Interfaces;
@@ -95,13 +96,27 @@ public class AuthService : IAuthService
         // Always return success to avoid account enumeration.
         var user = await _uow.Users.FirstOrDefaultAsync(u => u.Email == email.Trim().ToLowerInvariant());
         if (user is not null)
-            _logger.LogInformation("Password reset requested for {Email}", email);
+        {
+            user.PasswordResetToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+            user.PasswordResetTokenExpiry = DateTime.UtcNow.AddHours(1);
+            _uow.Users.Update(user);
+            await _uow.SaveChangesAsync();
+            _logger.LogInformation("Password reset token generated for {Email}: {Token}", email, user.PasswordResetToken);
+        }
     }
 
-    public Task ResetPasswordAsync(string token, string newPassword)
+    public async Task ResetPasswordAsync(string token, string newPassword)
     {
-        // Production flow sends email with a signed token. For development the app uses a mock reset.
-        throw new AppError("Password reset requires an email provider. Use the development mock reset flow.", 400, "RESET_UNAVAILABLE");
+        var user = await _uow.Users.FirstOrDefaultAsync(u => u.PasswordResetToken == token);
+        if (user is null || user.PasswordResetTokenExpiry == null || user.PasswordResetTokenExpiry < DateTime.UtcNow)
+            throw new AppError("Invalid or expired reset token", 400, "INVALID_RESET_TOKEN");
+
+        user.PasswordHash = _hasher.Hash(newPassword);
+        user.PasswordResetToken = null;
+        user.PasswordResetTokenExpiry = null;
+        _uow.Users.Update(user);
+        await _uow.SaveChangesAsync();
+        _logger.LogInformation("Password reset completed for {Email}", user.Email);
     }
 
     public Task<AuthResult> GoogleAuthAsync(string idToken)

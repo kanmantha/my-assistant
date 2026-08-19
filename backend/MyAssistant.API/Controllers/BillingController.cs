@@ -31,7 +31,7 @@ public class BillingController : ControllerBase
 
     [HttpPost("subscription/upgrade")]
     public async Task<IActionResult> Upgrade(SubscriptionRequest body)
-        => Ok(ApiResponse<object>.Ok(await _subscriptions.UpgradeAsync(this.GetUserId(), body.PlanId, body.BillingPeriod ?? "monthly"), "Subscription upgraded"));
+        => Ok(ApiResponse<object>.Ok(await _subscriptions.UpgradeAsync(this.GetUserId(), body.PlanId, body.BillingPeriod ?? "monthly", body.Provider ?? "mock"), "Subscription upgraded"));
 
     [HttpPost("subscription/downgrade")]
     public async Task<IActionResult> Downgrade(SubscriptionRequest body)
@@ -58,6 +58,7 @@ public class SubscriptionRequest
 {
     public Guid PlanId { get; set; }
     public string? BillingPeriod { get; set; }
+    public string? Provider { get; set; }
 }
 
 public class VerifyPaymentRequest

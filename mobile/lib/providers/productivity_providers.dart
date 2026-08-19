@@ -116,3 +116,76 @@ class NotesState extends ChangeNotifier {
     notifyListeners();
   }
 }
+
+class AppointmentsState extends ChangeNotifier {
+  final BackendClient _backend;
+  List<Appointment> _appointments = [];
+  bool _busy = false;
+  String? _error;
+
+  AppointmentsState(this._backend);
+
+  List<Appointment> get appointments => List.unmodifiable(_appointments);
+  bool get busy => _busy;
+  String? get error => _error;
+
+  Future<void> setDemo() async {
+    final now = DateTime.now();
+    _appointments = [
+      Appointment(
+        id: 'demo-a1', title: 'Team standup', description: 'Daily sync',
+        startDateTime: DateTime(now.year, now.month, now.day, 10, 0),
+        endDateTime: DateTime(now.year, now.month, now.day, 10, 30),
+        location: 'Zoom', participants: const ['Team'], reminderMinutes: 15,
+        status: 'Scheduled', createdAt: now.toIso8601String(),
+      ),
+      Appointment(
+        id: 'demo-a2', title: 'Doctor appointment', description: 'Annual checkup',
+        startDateTime: DateTime(now.year, now.month, now.day, 15, 0),
+        endDateTime: DateTime(now.year, now.month, now.day, 16, 0),
+        location: 'City Hospital', participants: const [], reminderMinutes: 30,
+        status: 'Scheduled', createdAt: now.toIso8601String(),
+      ),
+    ];
+    notifyListeners();
+  }
+
+  Future<void> load() async {
+    _busy = true;
+    _error = null;
+    notifyListeners();
+    try {
+      _appointments = await _backend.appointments();
+    } catch (e) {
+      _error = e.toString();
+    }
+    _busy = false;
+    notifyListeners();
+  }
+
+  Future<void> add({
+    required String title,
+    String description = '',
+    required String startDateTime,
+    String? endDateTime,
+    String? location,
+    String? participants,
+  }) async {
+    final appt = await _backend.createAppointment(
+      title: title,
+      description: description,
+      startDateTime: startDateTime,
+      endDateTime: endDateTime,
+      location: location,
+      participants: participants,
+    );
+    _appointments.insert(0, appt);
+    notifyListeners();
+  }
+
+  Future<void> remove(String id) async {
+    await _backend.deleteAppointment(id);
+    _appointments = _appointments.where((a) => a.id != id).toList();
+    notifyListeners();
+  }
+}

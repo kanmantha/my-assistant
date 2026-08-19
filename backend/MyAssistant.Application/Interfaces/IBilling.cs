@@ -12,7 +12,7 @@ public interface IPaymentService
 public interface ISubscriptionService
 {
     Task<SubscriptionInfo> GetSubscriptionAsync(Guid userId);
-    Task<SubscriptionInfo> UpgradeAsync(Guid userId, Guid planId, string billingPeriod);
+    Task<SubscriptionInfo> UpgradeAsync(Guid userId, Guid planId, string billingPeriod, string provider = "mock");
     Task<SubscriptionInfo> DowngradeAsync(Guid userId, Guid planId);
     Task<SubscriptionInfo> CancelAsync(Guid userId);
     Task<IReadOnlyList<Plan>> GetPlansAsync(bool includeDisabled = false);

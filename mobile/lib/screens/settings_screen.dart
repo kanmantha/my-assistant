@@ -8,6 +8,9 @@ import '../providers/wake_word_provider.dart';
 import '../services/api_client.dart';
 import '../services/backend_client.dart';
 import '../services/secure_store.dart';
+import '../services/native_speech_service.dart';
+import '../services/speech_service.dart';
+import '../services/wake_word_service.dart';
 import '../theme.dart';
 import 'onboarding_screen.dart';
 
@@ -109,7 +112,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: Text(profile?.fullName ?? 'Guest'),
               subtitle: Text(profile?.email ?? (auth.demoMode ? 'Demo Mode Active' : 'Not signed in')),
               trailing: auth.demoMode
-                  ? Chip(label: const Text('DEMO'), backgroundColor: AppTheme.success.withOpacity(0.15), labelStyle: const TextStyle(color: AppTheme.success, fontSize: 12))
+                  ? Chip(label: const Text('DEMO'), backgroundColor: AppTheme.success.withValues(alpha: 0.15), labelStyle: const TextStyle(color: AppTheme.success, fontSize: 12))
                   : null,
             ),
           ),
@@ -161,13 +164,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           }
                         },
                         title: const Text('Wake word'),
-                        subtitle: Text(
-                          busy
-                              ? 'Starting microphone…'
-                              : wake.running
-                                  ? 'Active — say "Hey Assistant"'
-                                  : '"Hey Assistant" (off)',
-                        ),
+                        subtitle: Text(wake.status),
                         secondary: busy
                             ? const SizedBox(
                                 height: 20,
@@ -179,6 +176,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 color: wake.running ? AppTheme.success : null,
                               ),
                       ),
+                      if (wake.enabled && wake.status.contains('retry'))
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                          child: ElevatedButton.icon(
+                            onPressed: () => wake.retry(),
+                            icon: const Icon(Icons.refresh, size: 16),
+                            label: const Text('Retry wake word'),
+                          ),
+                        ),
                       if (wake.isWeb)
                         const Padding(
                           padding: EdgeInsets.fromLTRB(16, 0, 16, 10),
@@ -189,6 +195,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                     ],
                   );
+                },
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.record_voice_over),
+                title: const Text('Test voice recognition'),
+                subtitle: const Text('Diagnose mic & speech engine'),
+                onTap: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Checking microphone & speech engine…')),
+                  );
+
+                  // Step 1: Check native availability
+                  if (NativeSpeechService.instance.isSupported) {
+                    final available = await NativeSpeechService.instance.isAvailable();
+                    if (!available) {
+                      if (!context.mounted) return;
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: const Text('No speech engine found! Install "Speech Services by Google" from Play Store.'),
+                          backgroundColor: Colors.red,
+                          duration: const Duration(seconds: 8),
+                        ),
+                      );
+                      return;
+                    }
+
+                    // Step 2: Check permission
+                    final hasPerm = await SpeechService.instance.checkMicPermission();
+                    if (!hasPerm) {
+                      final granted = await SpeechService.instance.requestMicPermission();
+                      if (!granted) {
+                        if (!context.mounted) return;
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: const Text('Microphone permission DENIED. Tap to open Settings.'),
+                            backgroundColor: Colors.red,
+                            action: SnackBarAction(
+                              label: 'OPEN SETTINGS',
+                              textColor: Colors.white,
+                              onPressed: () => SpeechService.instance.openAppSettings(),
+                            ),
+                            duration: const Duration(seconds: 8),
+                          ),
+                        );
+                        return;
+                      }
+                    }
+
+                    // Step 3: Try native listen
+                    if (!context.mounted) return;
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('Listening for 8 seconds — say anything…')),
+                    );
+                    final heard = await NativeSpeechService.instance.listenOnce(
+                      language: 'en-IN',
+                      timeout: const Duration(seconds: 8),
+                    );
+                    if (!context.mounted) return;
+                    final text = heard ?? '[No speech detected]';
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text('Heard: $text'),
+                        duration: const Duration(seconds: 5),
+                        backgroundColor: text.startsWith('[') ? Colors.orange : Colors.green,
+                      ),
+                    );
+                  } else {
+                    // Web/iOS fallback
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('Listening for 8 seconds — say anything…')),
+                    );
+                    final heard = await WakeWordService.instance.testListen();
+                    if (!context.mounted) return;
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text('Heard: $heard'),
+                        duration: const Duration(seconds: 5),
+                        backgroundColor: heard.startsWith('[') ? Colors.orange : Colors.green,
+                      ),
+                    );
+                  }
                 },
               ),
               const Divider(height: 1),

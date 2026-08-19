@@ -18,7 +18,7 @@ class BackendClient {
       'email': email,
       'password': password,
       'phone': phone ?? '',
-      if (language != null) 'preferredLanguage': language,
+      'preferredLanguage': ?language,
       'timezone': 'Asia/Kolkata',
     });
     final data = r['data'] as Map<String, dynamic>? ?? {};
@@ -51,8 +51,8 @@ Future<List<Plan>> plans() async {
   }) async {
     final r = await _api.post('/api/assistant/command', {
       'text': text,
-      if (language != null) 'language': language,
-      if (timezone != null) 'timezone': timezone,
+      'language': ?language,
+      'timezone': ?timezone,
     });
     return AssistantCommandResult.fromJson(r);
   }
@@ -94,12 +94,12 @@ Future<List<Plan>> plans() async {
     String? timezone,
   }) async {
     final r = await _api.put('/api/user/settings', {
-      if (language != null) 'language': language,
-      if (voiceEnabled != null) 'voiceEnabled': voiceEnabled,
-      if (wakeWordEnabled != null) 'wakeWordEnabled': wakeWordEnabled,
-      if (notificationsEnabled != null) 'notificationsEnabled': notificationsEnabled,
-      if (defaultReminderMinutes != null) 'defaultReminderMinutes': defaultReminderMinutes,
-      if (timezone != null) 'timezone': timezone,
+      'language': ?language,
+      'voiceEnabled': ?voiceEnabled,
+      'wakeWordEnabled': ?wakeWordEnabled,
+      'notificationsEnabled': ?notificationsEnabled,
+      'defaultReminderMinutes': ?defaultReminderMinutes,
+      'timezone': ?timezone,
     });
     return UserSettings.fromJson(r['data'] as Map<String, dynamic>? ?? {});
   }
@@ -108,7 +108,7 @@ Future<List<Plan>> plans() async {
     final r = await _api.post('/api/notes', {
       'title': title,
       'content': content,
-      if (tags != null) 'tags': tags,
+      'tags': ?tags,
     });
     return Note.fromJson(r['data'] as Map<String, dynamic>? ?? {});
   }
@@ -131,9 +131,9 @@ Future<List<Plan>> plans() async {
     final r = await _api.post('/api/tasks', {
       'title': title,
       'description': description,
-      if (priority != null) 'priority': priority,
-      if (dueDate != null) 'dueDate': dueDate,
-      if (dueTime != null) 'dueTime': dueTime,
+      'priority': ?priority,
+      'dueDate': ?dueDate,
+      'dueTime': ?dueTime,
     });
     return TaskItem.fromJson(r['data'] as Map<String, dynamic>? ?? {});
   }
@@ -161,5 +161,29 @@ Future<List<Plan>> plans() async {
     final r = await _api.get('/api/appointments');
     final data = r['data'] as List? ?? const [];
     return data.map((e) => Appointment.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<Appointment> createAppointment({
+    required String title,
+    String description = '',
+    required String startDateTime,
+    String? endDateTime,
+    String? location,
+    String? participants,
+  }) async {
+    final body = <String, dynamic>{
+      'title': title,
+      'description': description,
+      'startDateTime': startDateTime,
+    };
+    if (endDateTime != null) body['endDateTime'] = endDateTime;
+    if (location != null) body['location'] = location;
+    if (participants != null) body['participants'] = participants;
+    final r = await _api.post('/api/appointments', body);
+    return Appointment.fromJson(r['data'] as Map<String, dynamic>? ?? r);
+  }
+
+  Future<void> deleteAppointment(String id) async {
+    await _api.delete('/api/appointments/$id');
   }
 }

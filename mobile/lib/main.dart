@@ -44,6 +44,9 @@ class MyAssistantApp extends StatelessWidget {
           create: (context) => NotesState(context.read<BackendClient>()),
         ),
         ChangeNotifierProvider(
+          create: (context) => AppointmentsState(context.read<BackendClient>()),
+        ),
+        ChangeNotifierProvider(
           create: (context) => WakeWordProvider(context.read<BackendClient>()),
         ),
       ],
@@ -90,6 +93,7 @@ class _GateState extends State<Gate> {
         );
         await assistant.setDemoMode();
       } else if (tokens.access != null && tokens.refresh != null) {
+        if (!mounted) return;
         final backend = context.read<BackendClient>();
         try {
           final result = await backend.refreshToken(tokens.refresh!);

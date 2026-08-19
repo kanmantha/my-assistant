@@ -39,11 +39,10 @@ public class GooglePlayPaymentService : IPaymentService
     public Task<PaymentResult> CreateCheckoutAsync(Guid userId, Guid planId, string billingPeriod, string platform)
         => throw new NotSupportedException("Google Play Billing requires native app component; use server-side verification in VerifyAsync.");
 
-    public async Task<PaymentResult> VerifyAsync(Guid userId, string providerReference, string receipt)
+    public Task<PaymentResult> VerifyAsync(Guid userId, string providerReference, string receipt)
     {
-        // Placeholder for Google Play Developer API server-side purchase token verification.
-        _logger.LogInformation("Google Play purchase {Reference} verification endpoint invoked", providerReference);
-        return await Task.FromResult(new PaymentResult(true, "Verified (production verification requires service account credentials)", providerReference, receipt, null));
+        _logger.LogWarning("Google Play verification requested without service account credentials");
+        return Task.FromResult(new PaymentResult(false, "Google Play verification requires service account credentials. Configure GOOGLE_PLAY_SERVICE_ACCOUNT_JSON.", null, null, "GOOGLE_PLAY_CREDENTIALS_MISSING"));
     }
 
     public Task<PaymentResult> RestoreAsync(Guid userId, string platform)
@@ -55,10 +54,10 @@ public class AppleStoreKitPaymentService : IPaymentService
     private readonly ILogger<AppleStoreKitPaymentService> _logger;
     public AppleStoreKitPaymentService(ILogger<AppleStoreKitPaymentService> logger) => _logger = logger;
 
-    public async Task<PaymentResult> VerifyAsync(Guid userId, string providerReference, string receipt)
+    public Task<PaymentResult> VerifyAsync(Guid userId, string providerReference, string receipt)
     {
-        _logger.LogInformation("App Store receipt verification attempted for {Reference}", providerReference);
-        return await Task.FromResult(new PaymentResult(true, "Verified (production uses App Store Server API)", providerReference, receipt, null));
+        _logger.LogWarning("App Store verification requested without credentials");
+        return Task.FromResult(new PaymentResult(false, "App Store verification requires Apple App Store Server API credentials. Configure APPLE_BUNDLE_ID and APPLE_ISSUER_ID.", null, null, "APPLE_CREDENTIALS_MISSING"));
     }
 
     public Task<PaymentResult> CreateCheckoutAsync(Guid userId, Guid planId, string billingPeriod, string platform)

@@ -22,6 +22,14 @@ public class ProductivityController : ControllerBase
 
     private Guid UserId => Guid.Parse(User.Claims.First(c => c.Type == System.Security.Claims.ClaimTypes.NameIdentifier).Value);
 
+    private static string ComputeGreeting()
+    {
+        var hour = (DateTime.UtcNow + TimeSpan.FromHours(5) + TimeSpan.FromMinutes(30)).Hour;
+        if (hour < 12) return "Good Morning";
+        if (hour < 17) return "Good Afternoon";
+        return "Good Evening";
+    }
+
     [HttpGet("dashboard")]
     public async Task<IActionResult> Dashboard()
     {
@@ -35,7 +43,7 @@ public class ProductivityController : ControllerBase
 
         return Ok(ApiResponse<object>.Ok(new
         {
-            greeting = "Good Morning",
+            greeting = ComputeGreeting(),
             todayAppointments = appts.Where(a => a.StartDateTime.Date == today).OrderBy(a => a.StartDateTime),
             todayTasks = tasks.Where(t => t.Status == "Pending").Take(5),
             todayReminders = reminders.Where(r => r.ReminderDateTime.Date <= today.AddDays(1)).OrderBy(r => r.ReminderDateTime).Take(5),

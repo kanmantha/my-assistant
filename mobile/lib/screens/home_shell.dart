@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/assistant_provider.dart';
 import '../providers/wake_word_provider.dart';
+import 'appointments_screen.dart';
 import 'assistant_screen.dart';
 import 'dashboard_screen.dart';
 import 'notes_screen.dart';
@@ -25,6 +26,7 @@ class _HomeShellState extends State<HomeShell> {
     TasksScreen(),
     AssistantScreen(),
     NotesScreen(),
+    AppointmentsScreen(),
     SettingsScreen(),
   ];
 
@@ -32,8 +34,6 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     _wake = context.read<WakeWordProvider>();
-    // Set onWake immediately so no wake detections are lost while the
-    // wake word loop starts in the background.
     _wake?.onWake = _handleWake;
   }
 
@@ -53,8 +53,75 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final wake = context.watch<WakeWordProvider>();
+    final isError = wake.status.contains('unavailable') ||
+        wake.status.contains('Failed') ||
+        wake.status.contains('Disabled') ||
+        wake.status.contains('retry');
+
     return Scaffold(
-      body: IndexedStack(index: _index, children: _screens),
+      body: SafeArea(
+        child: Column(
+          children: [
+            if (wake.enabled)
+              GestureDetector(
+                onTap: isError ? () => wake.retry() : null,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  color: wake.running && wake.listening
+                      ? Colors.green.withValues(alpha: 0.15)
+                      : isError
+                          ? Colors.orange.withValues(alpha: 0.15)
+                          : Colors.deepPurple.withValues(alpha: 0.08),
+                  child: Row(
+                    children: [
+                      Icon(
+                        wake.running && wake.listening
+                            ? Icons.mic
+                            : isError
+                                ? Icons.error_outline
+                                : Icons.wb_twilight,
+                        size: 16,
+                        color: wake.running && wake.listening
+                            ? Colors.green
+                            : isError
+                                ? Colors.orange
+                                : Colors.deepPurple,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          wake.status,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: wake.running && wake.listening
+                                ? Colors.green.shade700
+                                : isError
+                                    ? Colors.orange.shade700
+                                    : Colors.deepPurple.shade700,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      if (isError)
+                        Text(
+                          'TAP TO RETRY',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange.shade700,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            Expanded(
+              child: IndexedStack(index: _index, children: _screens),
+            ),
+          ],
+        ),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
@@ -63,6 +130,7 @@ class _HomeShellState extends State<HomeShell> {
           NavigationDestination(icon: Icon(Icons.checklist_outlined), selectedIcon: Icon(Icons.checklist), label: 'Tasks'),
           NavigationDestination(icon: Icon(Icons.auto_awesome_outlined), selectedIcon: Icon(Icons.auto_awesome), label: 'Assistant'),
           NavigationDestination(icon: Icon(Icons.note_alt_outlined), selectedIcon: Icon(Icons.note_alt), label: 'Notes'),
+          NavigationDestination(icon: Icon(Icons.event_outlined), selectedIcon: Icon(Icons.event), label: 'Events'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),

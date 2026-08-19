@@ -18,6 +18,7 @@ class WakeWordProvider extends ChangeNotifier {
   bool _available = false;
   bool _running = false;
   bool _listening = false;
+  String _status = 'Idle';
 
   /// Fired when the wake phrase is heard so the UI can navigate to the
   /// assistant.
@@ -27,6 +28,7 @@ class WakeWordProvider extends ChangeNotifier {
   bool get available => _available;
   bool get running => _running;
   bool get listening => _listening;
+  String get status => _status;
   bool get isWeb => WakeWordService.instance.isWeb;
 
   /// Loads the persisted setting and resumes listening when it is enabled.
@@ -34,17 +36,14 @@ class WakeWordProvider extends ChangeNotifier {
   /// seed the local preference on first sync (e.g. after a fresh login
   /// with no local value yet).
   Future<void> restore() async {
+    _status = 'Initializing…';
+    notifyListeners();
     try {
       final local = await SecureStore.isWakeWordEnabled();
-      // If the user has never toggled wake word, the key won't exist in
-      // SecureStore. isWakeWordEnabled() returns true for unset keys,
-      // so we check for an explicit '0' / '1' to distinguish "user set
-      // it off" from "first launch".
       final explicit = await SecureStore.hasWakeWordSetting();
       if (explicit) {
         _enabled = local;
       } else {
-        // First launch — seed from backend if available, otherwise default ON.
         final backend = _backend;
         if (backend != null) {
           try {
@@ -62,27 +61,48 @@ class WakeWordProvider extends ChangeNotifier {
       _enabled = true;
     }
     if (_enabled) {
+      // Delay to let Android fully initialize SpeechRecognizer.
+      await Future<void>.delayed(const Duration(seconds: 3));
       final ok = await start();
-      if (!ok) _enabled = false;
+      if (!ok) {
+        _enabled = false;
+        _status = 'Speech unavailable — tap to retry';
+      }
+    } else {
+      _status = 'Disabled in settings';
     }
     notifyListeners();
   }
 
   /// Starts continuous listening. Returns true when listening began.
   Future<bool> start() async {
+    _status = 'Requesting microphone permission…';
+    notifyListeners();
     _available = await WakeWordService.instance.initialize();
-    if (!_available) return false;
+    if (!_available) {
+      _status = 'Speech engine unavailable — tap to retry';
+      notifyListeners();
+      return false;
+    }
+    _status = 'Starting wake word loop…';
+    notifyListeners();
     await WakeWordService.instance.start(onWake: _wake);
     _running = WakeWordService.instance.isRunning;
     _listening = WakeWordService.instance.isListening;
+    if (_running) {
+      _status = 'Listening for "Hey Assistant"';
+    } else {
+      _status = 'Failed to start';
+    }
     notifyListeners();
     return _running;
   }
 
   void _wake() {
+    _status = 'Wake detected!';
+    notifyListeners();
     unawaited(_syncBackend(true));
     onWake?.call();
-    notifyListeners();
   }
 
   Future<void> _syncBackend(bool value) async {
@@ -90,15 +110,27 @@ class WakeWordProvider extends ChangeNotifier {
     if (backend == null) return;
     try {
       await backend.updateUserSettings(wakeWordEnabled: value);
-    } catch (_) {
-      // Non-fatal: local state wins until next restore.
-    }
+    } catch (_) {}
   }
 
   Future<void> stop() async {
     await WakeWordService.instance.stop();
     _running = false;
     _listening = false;
+    _status = 'Stopped';
+    notifyListeners();
+  }
+
+  /// Retry initialization after failure.
+  Future<void> retry() async {
+    _status = 'Retrying…';
+    notifyListeners();
+    await WakeWordService.instance.stop();
+    _running = false;
+    _listening = false;
+    _available = false;
+    // Force re-initialization.
+    await start();
     notifyListeners();
   }
 

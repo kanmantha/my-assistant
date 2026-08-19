@@ -167,7 +167,7 @@ class _TaskTile extends StatelessWidget {
           children: [
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
               child: Text(task.priority, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
             ),
             IconButton(

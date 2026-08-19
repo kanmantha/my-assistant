@@ -18,8 +18,8 @@ class _SplashScreenState extends State<SplashScreen> {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
-          pageBuilder: (_, __, ___) => const Gate(),
-          transitionsBuilder: (_, animation, __, child) =>
+          pageBuilder: (_, _, _) => const Gate(),
+          transitionsBuilder: (_, animation, _, child) =>
               FadeTransition(opacity: animation, child: child),
         ),
       );
@@ -45,7 +45,7 @@ class _SplashScreenState extends State<SplashScreen> {
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
+                    color: Colors.black.withValues(alpha: 0.3),
                     blurRadius: 40,
                     spreadRadius: 2,
                   ),

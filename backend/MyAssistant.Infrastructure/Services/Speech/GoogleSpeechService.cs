@@ -100,7 +100,8 @@ public class GoogleTtsService : ITextToSpeechService
 
     public async Task<string> SynthesizeAsync(string text, string? languageCode = null)
     {
-        if (!IsAvailable) return $"MOCK_AUDIO::{text}";
+        if (!IsAvailable)
+            throw new InvalidOperationException("Google TTS API key is not configured. Set the GOOGLE_TTS_API_KEY environment variable.");
 
         var voiceMap = new Dictionary<string, (string Lang, string Name)>
         {
@@ -124,8 +125,8 @@ public class GoogleTtsService : ITextToSpeechService
 
         if (!resp.IsSuccessStatusCode)
         {
-            _logger.LogError("Google TTS returned {Status}", (int)resp.StatusCode);
-            return $"MOCK_AUDIO::{text}";
+            _logger.LogError("Google TTS returned {Status}: {Body}", (int)resp.StatusCode, respBody);
+            throw new InvalidOperationException($"Google TTS failed with status {(int)resp.StatusCode}");
         }
 
         try
@@ -136,7 +137,8 @@ public class GoogleTtsService : ITextToSpeechService
         catch (Exception ex)
         {
             _logger.LogError(ex, "TTS parse failure");
-            return $"MOCK_AUDIO::{text}";
+            throw new InvalidOperationException("Failed to parse Google TTS response", ex);
+        }
         }
     }
 }

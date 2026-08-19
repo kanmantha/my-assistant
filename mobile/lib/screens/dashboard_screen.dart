@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
+import '../services/backend_client.dart';
 import '../services/chrome_launcher.dart';
 import '../theme.dart';
 import 'assistant_screen.dart';
@@ -73,9 +74,9 @@ class _OrbCard extends StatelessWidget {
             height: 84,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: Colors.white.withOpacity(0.15),
-              border: Border.all(color: Colors.white.withOpacity(0.35), width: 2),
-              boxShadow: [BoxShadow(color: Colors.white.withOpacity(0.2), blurRadius: 24)],
+              color: Colors.white.withValues(alpha: 0.15),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 2),
+              boxShadow: [BoxShadow(color: Colors.white.withValues(alpha: 0.2), blurRadius: 24)],
             ),
             child: const Icon(Icons.auto_awesome, color: Colors.white, size: 40),
           ),
@@ -90,7 +91,7 @@ class _OrbCard extends StatelessWidget {
                     style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 6),
                 Text('How can I help you today? Tap the assistant orb.',
-                    style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13)),
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13)),
               ],
             ),
           ),
@@ -137,7 +138,7 @@ class _PlanCard extends StatelessWidget {
               const Spacer(),
               Chip(
                 label: Text('AI: ${isUnlimited ? "Unlimited" : "$used / $limit"}'),
-                backgroundColor: planColor.withOpacity(0.1),
+                backgroundColor: planColor.withValues(alpha: 0.1),
                 labelStyle: TextStyle(color: planColor, fontSize: 12),
               ),
             ],
@@ -158,7 +159,54 @@ class _PlanCard extends StatelessWidget {
   }
 }
 
-class _TodaySummaryIcons extends StatelessWidget {
+class _TodaySummaryIcons extends StatefulWidget {
+  const _TodaySummaryIcons();
+
+  @override
+  State<_TodaySummaryIcons> createState() => _TodaySummaryIconsState();
+}
+
+class _TodaySummaryIconsState extends State<_TodaySummaryIcons> {
+  int _taskCount = 0;
+  int _reminderCount = 0;
+  int _apptCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final client = context.read<BackendClient>();
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final tomorrow = today.add(const Duration(days: 1));
+
+      final results = await Future.wait([
+        client.tasks(),
+        client.reminders(),
+        client.appointments(),
+      ]);
+
+      if (!mounted) return;
+
+      final tasks = results[0] as List;
+      final reminders = results[1] as List;
+      final appts = results[2] as List;
+
+      setState(() {
+        _taskCount = tasks.where((t) => t.status == 'Pending').length;
+        _reminderCount = reminders.where((r) {
+          final dt = r.reminderDateTime;
+          return !dt.isBefore(today) && dt.isBefore(tomorrow);
+        }).length;
+        _apptCount = appts.where((a) => a.startDateTime.isAfter(today) && a.startDateTime.isBefore(tomorrow)).length;
+      });
+    } catch (_) {}
+  }
+
   @override
   Widget build(BuildContext context) {
     final now = DateFormat('EEE, d MMM').format(DateTime.now());
@@ -182,9 +230,9 @@ class _TodaySummaryIcons extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _CountItem(icon: Icons.checklist, label: 'Tasks', count: 0, color: AppTheme.primary),
-                _CountItem(icon: Icons.alarm, label: 'Reminders', count: 0, color: const Color(0xFFE17055)),
-                _CountItem(icon: Icons.event, label: 'Appointments', count: 0, color: const Color(0xFF00B894)),
+                _CountItem(icon: Icons.checklist, label: 'Tasks', count: _taskCount, color: AppTheme.primary),
+                _CountItem(icon: Icons.alarm, label: 'Reminders', count: _reminderCount, color: const Color(0xFFE17055)),
+                _CountItem(icon: Icons.event, label: 'Appointments', count: _apptCount, color: const Color(0xFF00B894)),
               ],
             ),
           ],
@@ -208,7 +256,7 @@ class _CountItem extends StatelessWidget {
       children: [
         Container(
           padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(14)),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(14)),
           child: Icon(icon, color: color, size: 26),
         ),
         const SizedBox(height: 6),

@@ -49,8 +49,8 @@ class OnboardingScreen extends StatelessWidget {
                     height: 110,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.15),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 40)],
+                      color: Colors.white.withValues(alpha: 0.15),
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 40)],
                     ),
                     child: const Icon(Icons.auto_awesome, color: Colors.white, size: 54),
                   ),

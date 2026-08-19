@@ -18,6 +18,8 @@ public class User
     public bool IsSuspended { get; set; }
     public string PreferredLanguage { get; set; } = "en-IN";
     public string Timezone { get; set; } = "Asia/Kolkata";
+    public string? PasswordResetToken { get; set; }
+    public DateTime? PasswordResetTokenExpiry { get; set; }
     public Guid? OrganizationId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }

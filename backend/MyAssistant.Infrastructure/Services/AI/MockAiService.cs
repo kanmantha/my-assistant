@@ -23,13 +23,17 @@ public class MockAiService : IAssistantAiService
         return Task.FromResult(result);
     }
 
-    public Task<AssistantResult> ProcessCommandAsync(AssistantRequest request)
-        => Task.FromResult(new AssistantResult
+    public async Task<AssistantResult> ProcessCommandAsync(AssistantRequest request)
+    {
+        var intent = await DetectIntentAsync(request);
+        return new AssistantResult
         {
             Success = true,
-            Intent = "Help",
-            IntentData = new IntentResult { Intent = AssistantIntents.Help, Language = request.Language }
-        });
+            Intent = intent.Intent,
+            IntentData = intent,
+            ResponseLanguage = intent.Language
+        };
+    }
 }
 
 /// <summary>Parses natural-language commands into structured intents.</summary>

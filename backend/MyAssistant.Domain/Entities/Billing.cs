@@ -62,7 +62,7 @@ public class Subscription
     public DateTime? RenewalDate { get; set; }
     public DateTime? CancelAt { get; set; }
     public DateTime? CancelledAt { get; set; }
-    public string? Provider { get; set; }       // google | apple | mock | stripe
+    public string? Provider { get; set; }       // googleplay | apple | stripe | mock (development only)
     public string? ProviderSubscriptionId { get; set; }
     public string? ProviderPurchaseToken { get; set; }
     public string? Platform { get; set; }
@@ -90,7 +90,7 @@ public class Payment
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "INR";
     public PaymentStatus Status { get; set; } = PaymentStatus.Pending;
-    public string Provider { get; set; } = "mock";
+    public string Provider { get; set; } = string.Empty;  // googleplay | apple | stripe | mock (development only)
     public string? ProviderReference { get; set; }
     public string? ProviderReceipt { get; set; }
     public string Description { get; set; } = string.Empty;
