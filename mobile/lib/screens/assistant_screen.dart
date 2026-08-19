@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:developer' as dev;
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../providers/assistant_provider.dart';
 import '../providers/productivity_providers.dart';
@@ -325,12 +328,67 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
     // Help
     if (_isHelpIntent(lower)) {
-      final msg = 'I can help you with notes, tasks, appointments, and reminders. '
-          'Try saying: "Take a note about project deadline", "Create a task to buy groceries", '
-          '"Schedule meeting with Ram at 3 PM", or "Remind me to call mom tomorrow".';
+      final msg = 'I can help you with notes, tasks, appointments, reminders, '
+          'weather, web search, timers, calculations, jokes, and more. '
+          'Try saying: "What\'s the weather?", "Search for Flutter docs", '
+          '"Set a timer for 5 minutes", or "What\'s 2 plus 3?"';
       assistant.addAssistantText(msg);
       _scrollToBottom();
       await TtsService.instance.speak(msg);
+      return;
+    }
+
+    // Weather
+    if (_isWeatherIntent(lower)) {
+      await _handleWeather(text);
+      return;
+    }
+
+    // Timer / Countdown
+    if (_isTimerIntent(lower)) {
+      await _handleTimer(lower);
+      return;
+    }
+
+    // Math calculator
+    if (_isMathIntent(lower)) {
+      await _handleMath(lower);
+      return;
+    }
+
+    // Joke
+    if (_isJokeIntent(lower)) {
+      await _handleJoke();
+      return;
+    }
+
+    // Quote
+    if (_isQuoteIntent(lower)) {
+      await _handleQuote();
+      return;
+    }
+
+    // Unit conversion
+    if (_isConvertIntent(lower)) {
+      await _handleConversion(lower);
+      return;
+    }
+
+    // Navigation / Maps
+    if (_isNavigationIntent(lower)) {
+      await _handleNavigation(text);
+      return;
+    }
+
+    // Quick actions (open app, flashlight)
+    if (_isQuickActionIntent(lower)) {
+      await _handleQuickAction(lower);
+      return;
+    }
+
+    // Web search / General Q&A passthrough
+    if (_isWebSearchIntent(lower)) {
+      await _handleWebSearch(text);
       return;
     }
 
@@ -363,6 +421,418 @@ class _AssistantScreenState extends State<AssistantScreen> {
     } finally {
       assistant.setBusy(false);
       _scrollToBottom();
+    }
+  }
+
+  // ─── Siri-like handlers ───────────────────────────────────────────
+
+  Future<void> _handleWeather(String text) async {
+    final assistant = context.read<AssistantProvider>();
+    assistant.setBusy(true);
+    try {
+      // Default to Bengaluru; extract city if mentioned
+      double lat = 12.9716, lon = 77.5946;
+      final cityMatch = RegExp(r'weather (?:in|at|of|for)\s+(.+)', caseSensitive: false)
+          .firstMatch(text.toLowerCase());
+      String cityName = 'Bengaluru';
+      if (cityMatch != null) {
+        cityName = cityMatch.group(1)?.trim() ?? 'Bengaluru';
+        // Geocode via Open-Meteo
+        final geoUrl = Uri.parse(
+            'https://geocoding-api.open-meteo.com/v1/search?name=${Uri.encodeComponent(cityName)}&count=1&language=en');
+        final geoResp = await _httpGet(geoUrl);
+        if (geoResp != null) {
+          final geoData = jsonDecode(geoResp);
+          final results = geoData['results'] as List?;
+          if (results != null && results.isNotEmpty) {
+            lat = results[0]['latitude'] ?? lat;
+            lon = results[0]['longitude'] ?? lon;
+            cityName = results[0]['name'] ?? cityName;
+          }
+        }
+      }
+
+      final url = Uri.parse(
+          'https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon'
+          '&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m'
+          '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max'
+          '&timezone=Asia%2FKolkata&forecast_days=3');
+      final resp = await _httpGet(url);
+      if (resp == null) {
+        assistant.addAssistantText('Could not fetch weather data.');
+        await TtsService.instance.speak('Sorry, I could not get the weather right now.');
+        return;
+      }
+      final data = jsonDecode(resp);
+      final current = data['current'] as Map<String, dynamic>?;
+      final daily = data['daily'] as Map<String, dynamic>?;
+      if (current == null) {
+        assistant.addAssistantText('No weather data available for $cityName.');
+        return;
+      }
+      final temp = current['temperature_2m'];
+      final humidity = current['relative_humidity_2m'];
+      final wind = current['wind_speed_10m'];
+      final wmo = current['weather_code'] as int? ?? 0;
+      final condition = _wmoToText(wmo);
+
+      var msg = 'In $cityName, it\'s currently $temp°C with $condition. '
+          'Humidity is $humidity% and wind speed is $wind km/h.';
+
+      if (daily != null) {
+        final maxTemps = daily['temperature_2m_max'] as List?;
+        final minTemps = daily['temperature_2m_min'] as List?;
+        final precip = daily['precipitation_probability_max'] as List?;
+        if (maxTemps != null && maxTemps.length >= 3) {
+          msg += ' Tomorrow: ${minTemps != null ? minTemps[1] : '?'}° to ${maxTemps[1]}°, '
+              'rain chance ${precip != null ? precip[1] : 0}%. '
+              'Day after: ${minTemps != null ? minTemps[2] : '?'}° to ${maxTemps[2]}°.';
+        }
+      }
+      assistant.addAssistantText(msg);
+      _scrollToBottom();
+      await TtsService.instance.speak(msg);
+    } catch (e) {
+      assistant.addAssistantText('Could not fetch weather: $e');
+      await TtsService.instance.speak('Sorry, I could not get the weather.');
+    } finally {
+      assistant.setBusy(false);
+      _scrollToBottom();
+    }
+  }
+
+  String _wmoToText(int code) {
+    const descriptions = {
+      0: 'clear sky', 1: 'mainly clear', 2: 'partly cloudy', 3: 'overcast',
+      45: 'foggy', 48: 'rime fog', 51: 'light drizzle', 53: 'moderate drizzle',
+      55: 'dense drizzle', 56: 'freezing drizzle', 57: 'dense freezing drizzle',
+      61: 'slight rain', 63: 'moderate rain', 65: 'heavy rain',
+      66: 'freezing rain', 67: 'heavy freezing rain',
+      71: 'slight snow', 73: 'moderate snow', 75: 'heavy snow', 77: 'snow grains',
+      80: 'slight showers', 81: 'moderate showers', 82: 'violent showers',
+      85: 'slight snow showers', 86: 'heavy snow showers',
+      95: 'thunderstorm', 96: 'thunderstorm with hail', 99: 'heavy thunderstorm with hail',
+    };
+    return descriptions[code] ?? 'unknown conditions';
+  }
+
+  Future<void> _handleTimer(String lower) async {
+    final assistant = context.read<AssistantProvider>();
+    // Extract minutes from the text
+    final minMatch = RegExp(r'(\d+)\s*(?:minutes?|mins?)').firstMatch(lower);
+    final secMatch = RegExp(r'(\d+)\s*(?:seconds?|secs?)').firstMatch(lower);
+    final hourMatch = RegExp(r'(\d+)\s*(?:hours?|hrs?)').firstMatch(lower);
+
+    int totalSeconds = 0;
+    if (hourMatch != null) totalSeconds += int.parse(hourMatch.group(1)!) * 3600;
+    if (minMatch != null) totalSeconds += int.parse(minMatch.group(1)!) * 60;
+    if (secMatch != null) totalSeconds += int.parse(secMatch.group(1)!);
+    if (totalSeconds == 0) totalSeconds = 300; // default 5 min
+
+    final mins = totalSeconds ~/ 60;
+    final secs = totalSeconds % 60;
+    final durationText = mins > 0 ? '$mins minute${mins > 1 ? "s" : ""}' : '$secs seconds';
+
+    assistant.addAssistantText('Starting a $durationText timer...');
+    _scrollToBottom();
+    await TtsService.instance.speak('Timer started for $durationText.');
+
+    // Show countdown in a dialog
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => _TimerCountdown(totalSeconds: totalSeconds),
+    ).then((_) {
+      TtsService.instance.speak('Timer finished!');
+    });
+  }
+
+  Future<void> _handleMath(String lower) async {
+    final assistant = context.read<AssistantProvider>();
+    try {
+      // Normalize the expression
+      var expr = lower
+          .replaceAll('what is ', '').replaceAll('what s ', '').replaceAll('whats ', '')
+          .replaceAll('calculate ', '').replaceAll('compute ', '').replaceAll('solve ', '')
+          .replaceAll('plus', '+').replaceAll('minus', '-')
+          .replaceAll('times', '*').replaceAll('multiplied by', '*')
+          .replaceAll('divided by', '/').replaceAll('over', '/')
+          .replaceAll('modulus', '%').replaceAll('mod ', '%')
+          .replaceAll(RegExp(r'[^0-9+\-*/().%\s]'), '')
+          .trim();
+
+      if (expr.isEmpty) {
+        assistant.addAssistantText('I couldn\'t understand the math expression.');
+        await TtsService.instance.speak('Sorry, I couldn\'t understand the expression.');
+        return;
+      }
+
+      // Simple safe eval (supports +, -, *, /, %, parentheses)
+      final result = _evalMath(expr);
+      final resultStr = result == result.toInt().toDouble()
+          ? result.toInt().toString()
+          : result.toStringAsFixed(4).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+
+      final msg = '$expr = $resultStr';
+      assistant.addAssistantText(msg);
+      _scrollToBottom();
+      await TtsService.instance.speak('The answer is $resultStr');
+    } catch (e) {
+      assistant.addAssistantText('Could not calculate: $e');
+      await TtsService.instance.speak('Sorry, I could not calculate that.');
+    }
+  }
+
+  double _evalMath(String expr) {
+    expr = expr.replaceAll(' ', '');
+    int pos = 0;
+
+    late final double Function() parseExpr;
+    late final double Function() parseTerm;
+
+    double parseAtom() {
+      if (pos < expr.length && expr[pos] == '(') {
+        pos++;
+        final result = parseExpr();
+        if (pos < expr.length && expr[pos] == ')') pos++;
+        return result;
+      }
+      int sign = 1;
+      if (pos < expr.length && expr[pos] == '-') {
+        sign = -1;
+        pos++;
+      } else if (pos < expr.length && expr[pos] == '+') {
+        pos++;
+      }
+      int start = pos;
+      while (pos < expr.length &&
+          ((expr[pos].codeUnitAt(0) >= 48 && expr[pos].codeUnitAt(0) <= 57) || expr[pos] == '.')) {
+        pos++;
+      }
+      return sign * double.parse(expr.substring(start, pos));
+    }
+
+    parseTerm = () {
+      double left = parseAtom();
+      while (pos < expr.length && (expr[pos] == '*' || expr[pos] == '/' || expr[pos] == '%')) {
+        final op = expr[pos++];
+        final right = parseAtom();
+        if (op == '*') {
+          left *= right;
+        } else if (op == '/') {
+          left /= right;
+        } else {
+          left %= right;
+        }
+      }
+      return left;
+    };
+
+    parseExpr = () {
+      double left = parseTerm();
+      while (pos < expr.length && (expr[pos] == '+' || expr[pos] == '-')) {
+        final op = expr[pos++];
+        final right = parseTerm();
+        left = op == '+' ? left + right : left - right;
+      }
+      return left;
+    };
+
+    return parseExpr();
+  }
+
+  Future<void> _handleJoke() async {
+    final assistant = context.read<AssistantProvider>();
+    const jokes = [
+      'Why do programmers prefer dark mode? Because light attracts bugs!',
+      'Why was the JavaScript developer sad? Because he didn\'t Node how to Express himself.',
+      'A SQL query walks into a bar, sees two tables and asks... "Can I JOIN you?"',
+      'Why do Java developers wear glasses? Because they can\'t C#.',
+      'What\'s a programmer\'s favorite hangout place? Foo Bar.',
+      'Why do programmers hate nature? It has too many bugs.',
+      'How many programmers does it take to change a light bulb? None, that\'s a hardware problem.',
+      'Why did the developer go broke? Because he used up all his cache.',
+      'What\'s a computer\'s favorite snack? Microchips!',
+      'Why did the computer go to the doctor? Because it had a virus!',
+      'What do you call a computer that sings? A-Dell!',
+      'Why was the computer cold? It left its Windows open!',
+    ];
+    final joke = jokes[math.Random().nextInt(jokes.length)];
+    assistant.addAssistantText(joke);
+    _scrollToBottom();
+    await TtsService.instance.speak(joke);
+  }
+
+  Future<void> _handleQuote() async {
+    final assistant = context.read<AssistantProvider>();
+    const quotes = [
+      'The only way to do great work is to love what you do. — Steve Jobs',
+      'Innovation distinguishes between a leader and a follower. — Steve Jobs',
+      'Stay hungry, stay foolish. — Steve Jobs',
+      'Life is what happens when you\'re busy making other plans. — John Lennon',
+      'The future belongs to those who believe in the beauty of their dreams. — Eleanor Roosevelt',
+      'It is during our darkest moments that we must focus to see the light. — Aristotle',
+      'The best time to plant a tree was 20 years ago. The second best time is now. — Chinese Proverb',
+      'Your time is limited, don\'t waste it living someone else\'s life. — Steve Jobs',
+      'If you look at what you have in life, you\'ll always have more. — Oprah Winfrey',
+      'The only impossible journey is the one you never begin. — Tony Robbins',
+      'Success is not final, failure is not fatal: it is the courage to continue that counts. — Winston Churchill',
+      'Believe you can and you\'re halfway there. — Theodore Roosevelt',
+    ];
+    final quote = quotes[math.Random().nextInt(quotes.length)];
+    assistant.addAssistantText(quote);
+    _scrollToBottom();
+    await TtsService.instance.speak(quote);
+  }
+
+  Future<void> _handleConversion(String lower) async {
+    final assistant = context.read<AssistantProvider>();
+    // Extract number
+    final numMatch = RegExp(r'([\d.]+)').firstMatch(lower);
+    if (numMatch == null) {
+      assistant.addAssistantText('Please specify a number to convert, like "convert 5 miles to km".');
+      await TtsService.instance.speak('Please specify a number to convert.');
+      return;
+    }
+    final num = double.parse(numMatch.group(1)!);
+    String result;
+    String from, to;
+
+    if (lower.contains('miles') && (lower.contains('km') || lower.contains('kilometer'))) {
+      result = (num * 1.60934).toStringAsFixed(2);
+      from = 'miles'; to = 'kilometers';
+    } else if ((lower.contains('km') || lower.contains('kilometer')) && lower.contains('miles')) {
+      result = (num / 1.60934).toStringAsFixed(2);
+      from = 'kilometers'; to = 'miles';
+    } else if (lower.contains('kg') && lower.contains('pound')) {
+      result = (num * 2.20462).toStringAsFixed(2);
+      from = 'kg'; to = 'pounds';
+    } else if (lower.contains('pound') && lower.contains('kg')) {
+      result = (num / 2.20462).toStringAsFixed(2);
+      from = 'pounds'; to = 'kg';
+    } else if (lower.contains('kg') && lower.contains('gram')) {
+      result = (num * 1000).toStringAsFixed(2);
+      from = 'kg'; to = 'grams';
+    } else if (lower.contains('gram') && lower.contains('kg')) {
+      result = (num / 1000).toStringAsFixed(2);
+      from = 'grams'; to = 'kg';
+    } else if (lower.contains('celsius') && lower.contains('fahrenheit')) {
+      result = ((num * 9 / 5) + 32).toStringAsFixed(1);
+      from = '°C'; to = '°F';
+    } else if (lower.contains('fahrenheit') && lower.contains('celsius')) {
+      result = ((num - 32) * 5 / 9).toStringAsFixed(1);
+      from = '°F'; to = '°C';
+    } else if (lower.contains('inch') && lower.contains('cm')) {
+      result = (num * 2.54).toStringAsFixed(2);
+      from = 'inches'; to = 'cm';
+    } else if (lower.contains('cm') && lower.contains('inch')) {
+      result = (num / 2.54).toStringAsFixed(2);
+      from = 'cm'; to = 'inches';
+    } else {
+      assistant.addAssistantText('Supported conversions: miles/km, kg/pounds/grams, °C/°F, inches/cm.');
+      await TtsService.instance.speak('I can convert miles, kilometers, kilograms, pounds, grams, celsius, fahrenheit, inches, and centimeters.');
+      return;
+    }
+    final msg = '$num $from = $result $to';
+    assistant.addAssistantText(msg);
+    _scrollToBottom();
+    await TtsService.instance.speak('$num $from equals $result $to');
+  }
+
+  Future<void> _handleNavigation(String text) async {
+    final assistant = context.read<AssistantProvider>();
+    final destMatch = RegExp(r'(?:to|at|of)\s+(.+)', caseSensitive: false).firstMatch(text);
+    final destination = destMatch?.group(1)?.trim() ?? text;
+    final url = Uri.parse('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(destination)}');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+      assistant.addAssistantText('Opening maps for "$destination"');
+      await TtsService.instance.speak('Opening directions to $destination');
+    } else {
+      assistant.addAssistantText('Could not open maps.');
+      await TtsService.instance.speak('Sorry, I could not open maps.');
+    }
+    _scrollToBottom();
+  }
+
+  Future<void> _handleQuickAction(String lower) async {
+    final assistant = context.read<AssistantProvider>();
+    if (lower.contains('flashlight') || lower.contains('torch')) {
+      assistant.addAssistantText('Flashlight toggle requires native platform support. Use the quick settings panel.');
+      await TtsService.instance.speak('Please use the quick settings panel to toggle the flashlight.');
+    } else {
+      // Map app names to package URIs
+      String? package;
+      if (lower.contains('settings')) {
+        package = 'package:com.android.settings';
+      } else if (lower.contains('calculator')) {
+        package = 'package:com.google.android.calculator';
+      } else if (lower.contains('clock')) {
+        package = 'package:com.google.android.deskclock';
+      } else if (lower.contains('calendar')) {
+        package = 'package:com.google.android.calendar';
+      } else if (lower.contains('camera')) {
+        package = 'package:com.android.camera';
+      } else if (lower.contains('youtube')) {
+        package = 'package:com.google.android.youtube';
+      } else if (lower.contains('chrome') || lower.contains('browser')) {
+        package = 'package:com.android.chrome';
+      }
+
+      if (package != null) {
+        final url = Uri.parse('intent://$package#Intent;end');
+        if (await canLaunchUrl(url)) {
+          await launchUrl(url, mode: LaunchMode.externalApplication);
+          assistant.addAssistantText('Opening ${lower.replaceAll('open ', '')}...');
+          await TtsService.instance.speak('Opening ${lower.replaceAll('open ', '')}');
+        } else {
+          // Fallback: search Play Store
+          final searchUrl = Uri.parse('https://play.google.com/store/apps/details?id=$package');
+          await launchUrl(searchUrl, mode: LaunchMode.externalApplication);
+          assistant.addAssistantText('Opening Play Store for this app.');
+          await TtsService.instance.speak('Opening Play Store.');
+        }
+      } else {
+        assistant.addAssistantText('I can open: settings, calculator, clock, calendar, camera, YouTube, Chrome, and maps.');
+        await TtsService.instance.speak('Please specify which app to open.');
+      }
+    }
+    _scrollToBottom();
+  }
+
+  Future<void> _handleWebSearch(String text) async {
+    final assistant = context.read<AssistantProvider>();
+    // Extract the query
+    var query = text
+        .replaceAll(RegExp(r'^(search for |search |look up |google |find |look for )', caseSensitive: false), '')
+        .replaceAll(RegExp(r'^(what is |who is |who was |what was |where is |where was |when was |when is |why is |why does |how do |how to |how does |tell me about |explain |define )', caseSensitive: false), '')
+        .trim();
+    if (query.isEmpty) query = text;
+
+    final url = Uri.parse('https://www.google.com/search?q=${Uri.encodeComponent(query)}');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+      assistant.addAssistantText('Searching for "$query"...');
+      await TtsService.instance.speak('Here are the results for $query');
+    } else {
+      assistant.addAssistantText('Could not open web search.');
+      await TtsService.instance.speak('Sorry, I could not perform the search.');
+    }
+    _scrollToBottom();
+  }
+
+  Future<String?> _httpGet(Uri url) async {
+    try {
+      final httpClient = HttpClient();
+      final request = await httpClient.getUrl(url);
+      final httpResponse = await request.close();
+      final body = await httpResponse.transform(utf8.decoder).join();
+      httpClient.close();
+      return body;
+    } catch (e) {
+      dev.log('[HTTP] GET error: $e');
+      return null;
     }
   }
 
@@ -455,6 +925,81 @@ class _AssistantScreenState extends State<AssistantScreen> {
       lower.contains('help') || lower.contains('what can you do') ||
       lower.contains('what do you do') || lower.contains('how do you work') ||
       lower.contains('commands') || lower.contains('features');
+
+  // ─── Siri-like intent detectors ─────────────────────────────────
+
+  bool _isWeatherIntent(String lower) =>
+      lower.contains('weather') || lower.contains('temperature') ||
+      lower.contains('is it raining') || lower.contains('is it cold') ||
+      lower.contains('is it hot') || lower.contains('forecast') ||
+      lower.contains('will it rain') || lower.contains('climate') ||
+      lower.contains('हवा') || lower.contains('मौसम') || lower.contains('వాతావరణం');
+
+  bool _isWebSearchIntent(String lower) =>
+      lower.startsWith('search for ') || lower.startsWith('search ') ||
+      lower.startsWith('look up ') || lower.startsWith('google ') ||
+      lower.startsWith('find ') || lower.startsWith('look for ') ||
+      lower.contains('what is ') || lower.contains('who is ') ||
+      lower.contains('who was ') || lower.contains('what was ') ||
+      lower.contains('where is ') || lower.contains('where was ') ||
+      lower.contains('when was ') || lower.contains('when is ') ||
+      lower.contains('why is ') || lower.contains('why does ') ||
+      lower.contains('how do ') || lower.contains('how to ') ||
+      lower.contains('how does ') || lower.contains('tell me about') ||
+      lower.contains('explain ') || lower.contains('define ');
+
+  bool _isTimerIntent(String lower) =>
+      lower.contains('set a timer') || lower.contains('start a timer') ||
+      lower.contains('timer for') || lower.contains('countdown') ||
+      lower.contains('set timer') || lower.contains('start timer') ||
+      lower.contains('remind me in') || lower.contains('countdown for');
+
+  bool _isMathIntent(String lower) =>
+      (lower.contains('what is ') || lower.contains('what s ') || lower.contains('whats ')) && _hasMathOperator(lower) ||
+      lower.contains('calculate') || lower.contains('compute') ||
+      lower.contains('solve') ||
+      lower.contains('plus') || lower.contains('minus') ||
+      lower.contains('times') || lower.contains('divided by') ||
+      lower.contains('square root') || lower.contains('percent');
+
+  bool _isJokeIntent(String lower) =>
+      lower.contains('tell me a joke') || lower.contains('joke') ||
+      lower.contains('make me laugh') || lower.contains('something funny') ||
+      lower.contains('चुटकुला') || lower.contains('సరదా');
+
+  bool _isQuoteIntent(String lower) =>
+      lower.contains('inspire me') || lower.contains('motivation') ||
+      lower.contains('quote') || lower.contains('saying') ||
+      lower.contains('मुहावरा') || lower.contains('సామెత');
+
+  bool _isConvertIntent(String lower) =>
+      lower.contains('convert') || lower.contains('how many miles') ||
+      lower.contains('how many kilometers') || lower.contains('how many km') ||
+      lower.contains('how many kg') || lower.contains('how many pounds') ||
+      lower.contains('how many grams') || lower.contains('how many ounces') ||
+      lower.contains('celsius to fahrenheit') || lower.contains('fahrenheit to celsius');
+
+  bool _isNavigationIntent(String lower) =>
+      lower.contains('navigate to') || lower.contains('open maps') ||
+      lower.contains('directions to') || lower.contains('take me to') ||
+      lower.contains('how to get to') || lower.contains('open google maps') ||
+      lower.contains('show on map') || lower.contains('location of');
+
+  bool _isQuickActionIntent(String lower) =>
+      lower.contains('open settings') || lower.contains('open camera') ||
+      lower.contains('open calculator') || lower.contains('open clock') ||
+      lower.contains('open calendar') || lower.contains('open gallery') ||
+      lower.contains('open chrome') || lower.contains('open browser') ||
+      lower.contains('open youtube') || lower.contains('open maps') ||
+      lower.contains('turn on flashlight') || lower.contains('turn off flashlight') ||
+      lower.contains('toggle flashlight') || lower.contains('flashlight on') ||
+      lower.contains('flashlight off');
+
+  bool _hasMathOperator(String lower) =>
+      lower.contains('+') || lower.contains('-') || lower.contains('*') ||
+      lower.contains('/') || lower.contains('plus') || lower.contains('minus') ||
+      lower.contains('times') || lower.contains('multiplied') ||
+      lower.contains('divided') || lower.contains('modulus') || lower.contains('%');
 
   // ─── Content extractors ─────────────────────────────────────────
 
@@ -1194,6 +1739,122 @@ class _InputBar extends StatelessWidget {
             IconButton.filled(
               onPressed: busy ? null : onSend,
               icon: Icon(busy ? Icons.hourglass_top : Icons.send),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TimerCountdown extends StatefulWidget {
+  final int totalSeconds;
+  const _TimerCountdown({required this.totalSeconds});
+
+  @override
+  State<_TimerCountdown> createState() => _TimerCountdownState();
+}
+
+class _TimerCountdownState extends State<_TimerCountdown>
+    with SingleTickerProviderStateMixin {
+  late int _remaining;
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnim;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _remaining = widget.totalSeconds;
+    _pulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800))
+      ..repeat(reverse: true);
+    _pulseAnim = Tween<double>(begin: 0.95, end: 1.05).animate(
+        CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
+    _startCountdown();
+  }
+
+  void _startCountdown() {
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (_remaining <= 0) {
+        t.cancel();
+        _pulseController.stop();
+        if (mounted) {
+          Navigator.of(context).pop();
+          TtsService.instance.speak('Timer finished!');
+        }
+        return;
+      }
+      if (mounted) setState(() => _remaining--);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  String _format(int s) {
+    final h = s ~/ 3600;
+    final m = (s % 3600) ~/ 60;
+    final sec = s % 60;
+    if (h > 0) return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
+    return '${m.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = _remaining / widget.totalSeconds;
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Timer', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 24),
+            AnimatedBuilder(
+              animation: _pulseAnim,
+              builder: (context, child) {
+                return Transform.scale(
+                  scale: _pulseAnim.value,
+                  child: SizedBox(
+                    width: 150, height: 150,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        SizedBox(
+                          width: 150, height: 150,
+                          child: CircularProgressIndicator(
+                            value: progress,
+                            strokeWidth: 8,
+                            backgroundColor: Colors.grey.shade200,
+                            color: _remaining <= 10 ? Colors.red : AppTheme.primary,
+                          ),
+                        ),
+                        Text(
+                          _format(_remaining),
+                          style: TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                            color: _remaining <= 10 ? Colors.red : AppTheme.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 24),
+            TextButton(
+              onPressed: () {
+                _timer?.cancel();
+                Navigator.of(context).pop();
+              },
+              child: const Text('Cancel Timer'),
             ),
           ],
         ),
