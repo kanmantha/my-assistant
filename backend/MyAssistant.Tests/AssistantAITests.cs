@@ -1,8 +1,12 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
+using MyAssistant.Application.DTOs.Appointments;
 using MyAssistant.Application.DTOs.Assistant;
+using MyAssistant.Application.DTOs.Notes;
+using MyAssistant.Application.DTOs.Reminders;
 using MyAssistant.Application.DTOs.Settings;
+using MyAssistant.Application.DTOs.Tasks;
 using MyAssistant.Application.Interfaces;
 using MyAssistant.Application.Services;
 using MyAssistant.Domain.Enums;
@@ -278,5 +282,221 @@ public class AssistantServiceAutoLanguageTests
         result.Should().NotBeNull();
         result.Intent.Should().Be(AssistantIntent.Unknown.ToString());
         result.Language.Should().Be("en-IN");
+    }
+}
+
+public class AssistantServiceGuidedCaptureTests
+{
+    private readonly Guid _userId = Guid.NewGuid();
+    private readonly string _session = "capture-test";
+
+    // Canned intents: a bare "Add Task"/"Add Note"/"Schedule meeting" plus date/category/title responses.
+    private static ParsedCommand IntentFor(string text)
+    {
+        var lower = text.Trim().ToLowerInvariant();
+        if (lower.StartsWith("add task")) return new ParsedCommand { Intent = AssistantIntent.CreateTask };
+        if (lower.StartsWith("add note")) return new ParsedCommand { Intent = AssistantIntent.CreateNote };
+        if (lower.StartsWith("schedule meeting")) return new ParsedCommand { Intent = AssistantIntent.CreateAppointment };
+        if (lower.Contains("tomorrow")) return new ParsedCommand { Intent = AssistantIntent.TomorrowSchedule };
+        if (lower.Contains("reminders") || lower.Contains("tasks") || lower.Contains("appointments")) return new ParsedCommand { Intent = AssistantIntent.ListReminders };
+        return new ParsedCommand { Intent = AssistantIntent.Unknown };
+    }
+
+    private AssistantService BuildService(
+        Mock<IAssistantAIService> ai,
+        out InMemoryAssistantSessionStore sessions,
+        Mock<INoteService>? notes = null,
+        Mock<ITaskService>? tasks = null,
+        Mock<IAppointmentService>? appointments = null)
+    {
+        sessions = new InMemoryAssistantSessionStore();
+        var time = new Mock<ITimeZoneService>();
+        time.Setup(t => t.NowInTimeZone(It.IsAny<string>())).Returns(new DateTime(2026, 8, 13, 10, 0, 0, DateTimeKind.Utc));
+        var dateTimeParser = new DateTimeParserService(time.Object);
+        var conversations = new Mock<IConversationRepository>();
+        var settings = new Mock<ISettingsService>();
+        settings.Setup(s => s.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new UserSettingsDto { TimeZone = "Asia/Kolkata", Language = "en" });
+        var subscription = new Mock<ISubscriptionService>();
+        var logger = new Mock<ILogger<AssistantService>>();
+        notes ??= new Mock<INoteService>();
+        tasks ??= new Mock<ITaskService>();
+        var reminders = new Mock<IReminderService>();
+        reminders.Setup(r => r.GetAllAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new List<ReminderDto>());
+        appointments ??= new Mock<IAppointmentService>();
+        var search = new Mock<ISearchService>();
+        return new AssistantService(
+            ai.Object, sessions, time.Object, dateTimeParser, settings.Object, conversations.Object,
+            subscription.Object, logger.Object, notes.Object, tasks.Object, reminders.Object,
+            appointments.Object, search.Object);
+    }
+
+    private AssistantRequest Req(string text) => new() { Text = text, Language = "en", SessionId = _session };
+
+    private async Task<AssistantResponse> Turn(Mock<IAssistantAIService> ai, AssistantService service, string text)
+    {
+        ai.Setup(a => a.ParseCommandAsync(text, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(IntentFor(text));
+        return await service.ProcessAsync(Req(text), _userId);
+    }
+
+    [Fact]
+    public async Task AddNote_Bare_AsksCategory_ThenContent_ThenCreatesNoteWithTag()
+    {
+        var ai = new Mock<IAssistantAIService>();
+        ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
+        var notes = new Mock<INoteService>();
+        notes.Setup(n => n.CreateAsync(It.IsAny<Guid>(), It.IsAny<CreateNoteRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid uid, CreateNoteRequest req, CancellationToken _) => new NoteDto
+            {
+                Id = Guid.NewGuid(),
+                Title = req.Title,
+                Content = req.Content,
+                Tags = req.Tags
+            });
+        var service = BuildService(ai, out var sessions, notes: notes);
+
+        var r1 = await Turn(ai, service, "Add Note");
+        r1.CaptureType.Should().Be("category");
+        r1.Reply.Should().Contain("category");
+
+        var r2 = await Turn(ai, service, "Work");
+        r2.CaptureType.Should().Be("text");
+        r2.Reply.Should().Contain("note");
+
+        var r3 = await Turn(ai, service, "buy milk and eggs");
+        r3.CaptureType.Should().BeNull();
+        r3.Reply.Should().Contain("saved");
+
+        notes.Verify(n => n.CreateAsync(_userId,
+            It.Is<CreateNoteRequest>(req => req.Content == "buy milk and eggs" && req.Tags.Contains("Work")),
+            It.IsAny<CancellationToken>()), Times.Once);
+        sessions.Get(_userId, _session).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AddTask_Bare_AsksDate_CapturesTomorrow_ThenCategory_ThenTitle_CreatesTask()
+    {
+        var ai = new Mock<IAssistantAIService>();
+        ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
+        var tasks = new Mock<ITaskService>();
+        tasks.Setup(t => t.CreateAsync(It.IsAny<Guid>(), It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid uid, CreateTaskRequest req, CancellationToken _) => new TaskDto
+            {
+                Id = Guid.NewGuid(),
+                Title = req.Title,
+                DueDate = req.DueDate,
+                Category = req.Category
+            });
+        var service = BuildService(ai, out var sessions, tasks: tasks);
+
+        var r1 = await Turn(ai, service, "Add Task");
+        r1.CaptureType.Should().Be("date");
+        r1.Reply.Should().Contain("date");
+
+        // "tomorrow" parses as TomorrowSchedule intent but must be captured as the date.
+        var r2 = await Turn(ai, service, "tomorrow");
+        r2.CaptureType.Should().Be("category");
+        r2.Reply.Should().Contain("category");
+
+        var r3 = await Turn(ai, service, "Personal");
+        r3.CaptureType.Should().Be("text");
+        r3.Reply.Should().Contain("task");
+
+        var r4 = await Turn(ai, service, "Prepare monthly report");
+        r4.CaptureType.Should().BeNull();
+        r4.Reply.Should().Contain("added");
+
+        tasks.Verify(t => t.CreateAsync(_userId,
+            It.Is<CreateTaskRequest>(req =>
+                req.Title == "Prepare monthly report" &&
+                req.Category == "Personal" &&
+                req.DueDate == DateOnly.FromDateTime(new DateTime(2026, 8, 14, 0, 0, 0, DateTimeKind.Utc))),
+            It.IsAny<CancellationToken>()), Times.Once);
+        sessions.Get(_userId, _session).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AddTask_SkipDate_AdvancesToCategory_AndCreatesTaskWithoutDate()
+    {
+        var ai = new Mock<IAssistantAIService>();
+        ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
+        var tasks = new Mock<ITaskService>();
+        tasks.Setup(t => t.CreateAsync(It.IsAny<Guid>(), It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid uid, CreateTaskRequest req, CancellationToken _) => new TaskDto
+            {
+                Id = Guid.NewGuid(),
+                Title = req.Title,
+                DueDate = req.DueDate
+            });
+        var service = BuildService(ai, out var sessions, tasks: tasks);
+
+        var r1 = await Turn(ai, service, "Add Task");
+        r1.CaptureType.Should().Be("date");
+
+        var r2 = await Turn(ai, service, "skip");
+        r2.CaptureType.Should().Be("category");
+
+        var r3 = await Turn(ai, service, "Work");
+        r3.CaptureType.Should().Be("text");
+
+        var r4 = await Turn(ai, service, "File taxes");
+        r4.CaptureType.Should().BeNull();
+
+        tasks.Verify(t => t.CreateAsync(_userId,
+            It.Is<CreateTaskRequest>(req => req.Title == "File taxes" && req.DueDate == null),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CaptureActive_RealCommand_SupersedesPendingFlow()
+    {
+        var ai = new Mock<IAssistantAIService>();
+        ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
+        var service = BuildService(ai, out var sessions);
+
+        var r1 = await Turn(ai, service, "Add Note");
+        r1.CaptureType.Should().Be("category");
+
+        // A genuine list command while mid-capture must be dispatched, not consumed as a category.
+        var r2 = await Turn(ai, service, "Today Tasks Reminders");
+        r2.Intent.Should().Be(AssistantIntent.ListReminders.ToString());
+        sessions.Get(_userId, _session).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ScheduleMeeting_Bare_AsksDate_ThenTitle_ThenConfirmation()
+    {
+        var ai = new Mock<IAssistantAIService>();
+        ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
+        var appointments = new Mock<IAppointmentService>();
+        appointments.Setup(a => a.CreateAsync(It.IsAny<Guid>(), It.IsAny<CreateAppointmentRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid uid, CreateAppointmentRequest req, CancellationToken _) => new AppointmentDto
+            {
+                Id = Guid.NewGuid(),
+                Title = req.Title,
+                StartDateTime = req.StartDateTime,
+                EndDateTime = req.EndDateTime ?? req.StartDateTime
+            });
+        var service = BuildService(ai, out var sessions, appointments: appointments);
+
+        var r1 = await Turn(ai, service, "Schedule meeting");
+        r1.CaptureType.Should().Be("date");
+
+        var r2 = await Turn(ai, service, "tomorrow");
+        r2.CaptureType.Should().Be("text");
+        r2.Reply.Should().Contain("meeting");
+
+        var r3 = await Turn(ai, service, "Team standup");
+        r3.NeedsConfirmation.Should().BeTrue();
+        r3.PendingAction.Should().Be(AssistantIntent.CreateAppointment.ToString());
+
+        var r4 = await Turn(ai, service, "yes");
+        r4.NeedsConfirmation.Should().BeFalse();
+
+        appointments.Verify(a => a.CreateAsync(_userId,
+            It.Is<CreateAppointmentRequest>(req => req.Title == "Team standup"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        sessions.Get(_userId, _session).Should().BeNull();
     }
 }
