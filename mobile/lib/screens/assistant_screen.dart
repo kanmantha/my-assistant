@@ -231,6 +231,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
         if (!mounted) return;
         if (result.type == 'note') {
           await context.read<NotesState>().add(result.title, result.content);
+          if (mounted) context.read<NotesState>().load();
         } else if (result.type == 'task') {
           await context.read<TasksState>().add(
             result.title,
@@ -238,6 +239,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
             priority: result.priority,
             dueDate: result.dateTime?.toIso8601String(),
           );
+          if (mounted) context.read<TasksState>().load();
         } else {
           final dt = result.dateTime ?? DateTime.now().add(const Duration(hours: 1));
           await context.read<AppointmentsState>().add(
@@ -246,6 +248,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
             endDateTime: dt.add(const Duration(hours: 1)).toIso8601String(),
             location: result.location,
           );
+          if (mounted) context.read<AppointmentsState>().load();
         }
         if (!mounted) return;
         final msg = '${_capitalize(result.type)} created: "${result.title}"';
@@ -873,7 +876,10 @@ class _AssistantScreenState extends State<AssistantScreen> {
       lower.contains('new meeting') || lower.contains('book a meeting') ||
       lower.contains('plan a meeting') || lower.contains('arrange a meeting') ||
       lower.contains('set meeting') || lower.contains('schedule a call') ||
-      lower.contains('set up appointment') || lower.contains('new appointment');
+      lower.contains('set up appointment') || lower.contains('new appointment') ||
+      lower.contains('record event') || lower.contains('record appointment') ||
+      lower.contains('add event') || lower.contains('create event') ||
+      lower.contains('new event') || lower.contains('schedule event');
 
   bool _isDeleteIntent(String lower) =>
       lower.contains('delete') || lower.contains('remove') ||
@@ -901,7 +907,15 @@ class _AssistantScreenState extends State<AssistantScreen> {
       lower.contains('do i have any meetings') || lower.contains('any meetings today') ||
       lower.contains('upcoming appointments') || lower.contains('what\'s coming up') ||
       lower.contains('my schedule today') || lower.contains('today\'s schedule') ||
-      lower.contains('tomorrow\'s schedule') || lower.contains('what\'s tomorrow');
+      lower.contains('tomorrow\'s schedule') || lower.contains('what\'s tomorrow') ||
+      lower.contains('list events') || lower.contains('show events') ||
+      lower.contains('today\'s events') || lower.contains('today events') ||
+      lower.contains('what events') || lower.contains('list down') && lower.contains('event') ||
+      lower.contains('list down') && lower.contains('today') ||
+      lower.contains('read out') && lower.contains('event') ||
+      lower.contains('read out') && lower.contains('today') ||
+      lower.contains('what do i have') || lower.contains('what have i got') ||
+      lower.contains('any events today') || lower.contains('events for today');
 
   bool _isListNotesIntent(String lower) =>
       lower.contains('show notes') || lower.contains('list notes') ||
@@ -929,7 +943,10 @@ class _AssistantScreenState extends State<AssistantScreen> {
       lower.contains('what\'s my day like') || lower.contains('what do i have today') ||
       lower.contains('how does my day look') || lower.contains('what\'s planned for today') ||
       lower.contains('today\'s agenda') || lower.contains('my day today') ||
-      lower.contains('what\'s on today') || lower.contains('schedule for today');
+      lower.contains('what\'s on today') || lower.contains('schedule for today') ||
+      lower.contains('list down today') || lower.contains('read out today') ||
+      lower.contains('what\'s happening today') || lower.contains('what today') ||
+      lower.contains('today plan') || lower.contains('today\'s plan');
 
   bool _isHelpIntent(String lower) =>
       lower.contains('help') || lower.contains('what can you do') ||

@@ -3,9 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../models/models.dart';
 import '../providers/auth_provider.dart';
+import '../providers/productivity_providers.dart';
 import '../services/backend_client.dart';
 import '../services/chrome_launcher.dart';
+import '../services/tts_service.dart';
 import '../theme.dart';
 import 'assistant_screen.dart';
 import 'notes_screen.dart';
@@ -45,6 +48,8 @@ class DashboardScreen extends StatelessWidget {
           if (profile != null) _PlanCard(profile: profile),
           const SizedBox(height: 16),
           _TodaySummaryIcons(),
+          const SizedBox(height: 16),
+          const _TodayEventsCard(),
           const SizedBox(height: 16),
           _QuickActions(),
         ],
@@ -309,6 +314,184 @@ class _QuickActions extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _TodayEventsCard extends StatefulWidget {
+  const _TodayEventsCard();
+
+  @override
+  State<_TodayEventsCard> createState() => _TodayEventsCardState();
+}
+
+class _TodayEventsCardState extends State<_TodayEventsCard> {
+  List<Appointment> _todayEvents = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final auth = context.read<AuthProvider>();
+      if (auth.demoMode) {
+        final state = context.read<AppointmentsState>();
+        state.setDemo();
+      } else {
+        final state = context.read<AppointmentsState>();
+        await state.load();
+      }
+      if (!mounted) return;
+      final state = context.read<AppointmentsState>();
+      final now = DateTime.now();
+      _todayEvents = state.appointments.where((a) {
+        return a.startDateTime.year == now.year &&
+            a.startDateTime.month == now.month &&
+            a.startDateTime.day == now.day;
+      }).toList()
+        ..sort((a, b) => a.startDateTime.compareTo(b.startDateTime));
+      setState(() => _loading = false);
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _readAloud() async {
+    if (_todayEvents.isEmpty) {
+      await TtsService.instance.speak('You have no events scheduled for today.');
+      return;
+    }
+    final timeFmt = DateFormat('h:mm a');
+    var msg = 'Today you have ${_todayEvents.length} event${_todayEvents.length > 1 ? 's' : ''}. ';
+    for (var i = 0; i < _todayEvents.length; i++) {
+      final e = _todayEvents[i];
+      final timeStr = timeFmt.format(e.startDateTime);
+      final loc = e.location.isNotEmpty ? ' at ${e.location}' : '';
+      msg += 'Number ${i + 1}: ${e.title}, scheduled for $timeStr$loc. ';
+    }
+    await TtsService.instance.speak(msg);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final timeFmt = DateFormat('h:mm a');
+
+    return Card(
+      elevation: 0,
+      color: Theme.of(context).colorScheme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.event, size: 18, color: AppTheme.primary),
+                const SizedBox(width: 8),
+                const Text("Today's Events", style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                const Spacer(),
+                if (_todayEvents.isNotEmpty)
+                  IconButton(
+                    icon: const Icon(Icons.volume_up, size: 20),
+                    tooltip: 'Read aloud',
+                    onPressed: _readAloud,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (_loading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(12),
+                  child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                ),
+              )
+            else if (_todayEvents.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  'No events scheduled for today.',
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+                ),
+              )
+            else
+              ...List.generate(_todayEvents.length > 5 ? 5 : _todayEvents.length, (i) {
+                final a = _todayEvents[i];
+                final timeStr = timeFmt.format(a.startDateTime);
+                final now = DateTime.now();
+                final diff = a.startDateTime.difference(now);
+                final isPast = diff.isNegative;
+                final isSoon = !isPast && diff.inMinutes < 60 && diff.inMinutes >= 0;
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 4,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: isPast ? Colors.grey : isSoon ? Colors.orange : Colors.deepPurple,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              a.title,
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                                color: isPast ? Colors.grey : null,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              '$timeStr${a.location.isNotEmpty ? ' · ${a.location}' : ''}',
+                              style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (isSoon)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade50,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text('Soon', style: TextStyle(fontSize: 10, color: Colors.orange.shade700)),
+                        )
+                      else if (isPast)
+                        Text('Past', style: TextStyle(fontSize: 10, color: Colors.grey.shade400)),
+                    ],
+                  ),
+                );
+              }),
+            if (_todayEvents.length > 5)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '+ ${_todayEvents.length - 5} more',
+                  style: TextStyle(fontSize: 12, color: AppTheme.primary, fontWeight: FontWeight.w500),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

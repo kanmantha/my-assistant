@@ -34,6 +34,7 @@ class _ConfirmationDialogState extends State<ConfirmationDialog> {
   late DateTime _selectedDate;
   late TimeOfDay _selectedTime;
   bool _hasTime = false;
+  bool _datePickerOpened = false;
 
   @override
   void initState() {
@@ -47,6 +48,34 @@ class _ConfirmationDialogState extends State<ConfirmationDialog> {
     _selectedDate = DateTime(dt.year, dt.month, dt.day);
     _selectedTime = TimeOfDay(hour: dt.hour, minute: dt.minute);
     _hasTime = widget.initialDateTime != null;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openCalendarFirst());
+  }
+
+  Future<void> _openCalendarFirst() async {
+    if (_datePickerOpened || !mounted) return;
+    _datePickerOpened = true;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+    );
+    if (picked != null && mounted) {
+      setState(() => _selectedDate = picked);
+      if (!_hasTime) {
+        final timePicked = await showTimePicker(
+          context: context,
+          initialTime: _selectedTime,
+        );
+        if (timePicked != null && mounted) {
+          setState(() {
+            _selectedTime = timePicked;
+            _hasTime = true;
+          });
+        }
+      }
+    }
   }
 
   @override
