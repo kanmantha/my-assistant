@@ -139,6 +139,11 @@ public class AssistantOrchestrator
             case AssistantIntents.Cancel: return Localize("Cancelled. How else can I help you?", intent.Language);
             case AssistantIntents.ChangeLanguage: return Localize("Language switched. How can I help you?", intent.Language);
             case AssistantIntents.Search: return await SearchAsync(userId, intent);
+            case AssistantIntents.ListTasks: return await ListTasksAsync(userId, intent);
+            case AssistantIntents.ListReminders: return await ListRemindersAsync(userId, intent);
+            case AssistantIntents.ListAppointments: return await ListAppointmentsAsync(userId, intent);
+            case AssistantIntents.UpdateAppointment: return await UpdateAppointmentAsync(userId, intent);
+            case AssistantIntents.UpdateReminder: return await UpdateReminderAsync(userId, intent);
             default: return HelpText(intent.Language);
         }
     }
@@ -214,6 +219,15 @@ public class AssistantOrchestrator
         return Localize($"Deleted the task \"{target.Title}\".", intent.Language);
     }
 
+    private async Task<string> ListTasksAsync(Guid userId, IntentResult intent)
+    {
+        var tasks = await _productivity.GetTasksAsync(userId);
+        var pending = tasks.Where(t => t.Status == "Pending").ToList();
+        if (pending.Count == 0) return Localize("You have no pending tasks. Great job!", intent.Language);
+        var items = pending.Take(10).Select(t => $"• {t.Title}");
+        return Localize($"You have {pending.Count} pending {(pending.Count == 1 ? "task" : "tasks")}:\n{string.Join("\n", items)}", intent.Language);
+    }
+
     // ----- reminders -----
     private async Task<string> CreateReminderAsync(Guid userId, IntentResult intent)
     {
@@ -241,6 +255,14 @@ public class AssistantOrchestrator
         if (target is null) return Localize("I couldn't find that reminder.", intent.Language);
         await _productivity.DeleteReminderAsync(userId, target.Id);
         return Localize($"The reminder \"{target.Title}\" has been deleted.", intent.Language);
+    }
+
+    private async Task<string> ListRemindersAsync(Guid userId, IntentResult intent)
+    {
+        var reminders = await _productivity.GetRemindersAsync(userId, onlyPending: true);
+        if (reminders.Count == 0) return Localize("You have no pending reminders.", intent.Language);
+        var items = reminders.Take(10).Select(r => $"• {r.Title} — {r.ReminderDateTime:hh:mm tt}");
+        return Localize($"You have {reminders.Count} pending {(reminders.Count == 1 ? "reminder" : "reminders")}:\n{string.Join("\n", items)}", intent.Language);
     }
 
     // ----- appointments -----
@@ -271,6 +293,50 @@ public class AssistantOrchestrator
         if (target is null) return Localize("I couldn't find a matching appointment.", intent.Language);
         await _productivity.DeleteAppointmentAsync(userId, target.Id);
         return Localize($"The appointment \"{target.Title}\" has been deleted.", intent.Language);
+    }
+
+    private async Task<string> ListAppointmentsAsync(Guid userId, IntentResult intent)
+    {
+        var appointments = await _productivity.GetAppointmentsAsync(userId, DateTime.Today, DateTime.Today.AddDays(30));
+        if (appointments.Count == 0) return Localize("You have no upcoming appointments.", intent.Language);
+        var items = appointments.Take(10).Select(a => $"• {a.StartDateTime:ddd dd MMM hh:mm tt} — {a.Title}");
+        return Localize($"You have {appointments.Count} upcoming {(appointments.Count == 1 ? "appointment" : "appointments")}:\n{string.Join("\n", items)}", intent.Language);
+    }
+
+    private async Task<string> UpdateAppointmentAsync(Guid userId, IntentResult intent)
+    {
+        var appointments = await _productivity.GetAppointmentsAsync(userId, DateTime.Today, DateTime.Today.AddYears(1));
+        var q = intent.Title?.ToLowerInvariant();
+        var target = string.IsNullOrWhiteSpace(q)
+            ? appointments.FirstOrDefault(a => a.Status == "Scheduled")
+            : appointments.FirstOrDefault(a => a.Title.ToLowerInvariant().Contains(q!));
+        if (target is null) return Localize("I couldn't find a matching appointment to update.", intent.Language);
+        var newStart = ResolveDateTime(intent);
+        if (newStart is not null)
+        {
+            var dto = await _productivity.UpdateAppointmentAsync(userId, target.Id,
+                new UpdateAppointmentRequest(StartDateTime: newStart));
+            return Localize($"Updated \"{target.Title}\" to {newStart:ddd dd MMM hh:mm tt}.", intent.Language);
+        }
+        return Localize("When would you like to reschedule it to?", intent.Language);
+    }
+
+    private async Task<string> UpdateReminderAsync(Guid userId, IntentResult intent)
+    {
+        var reminders = await _productivity.GetRemindersAsync(userId, onlyPending: true);
+        var q = (intent.Title ?? intent.Query)?.ToLowerInvariant();
+        var target = string.IsNullOrWhiteSpace(q)
+            ? reminders.FirstOrDefault()
+            : reminders.FirstOrDefault(r => r.Title.ToLowerInvariant().Contains(q!));
+        if (target is null) return Localize("I couldn't find a matching reminder to update.", intent.Language);
+        var newTime = ResolveDateTime(intent);
+        if (newTime is not null)
+        {
+            var dto = await _productivity.UpdateReminderAsync(userId, target.Id,
+                new UpdateReminderRequest(ReminderDateTime: newTime));
+            return Localize($"Updated \"{target.Title}\" to {newTime:ddd dd MMM hh:mm tt}.", intent.Language);
+        }
+        return Localize("When would you like to reschedule the reminder to?", intent.Language);
     }
 
     // ----- schedules -----

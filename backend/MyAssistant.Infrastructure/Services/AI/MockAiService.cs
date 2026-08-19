@@ -72,7 +72,58 @@ public static class Parser
             return result;
         }
 
-        // Appointments / meetings (checked before schedule queries so "schedule a meeting" is an appointment)
+        // Notes (checked before appointments — "take a note about meeting" is a note, not an appointment)
+        if (ctx.HasAny("note", "नोट", "గమనిక"))
+        {
+            if (ctx.HasAny("delete", "remove", "हटाओ", "తొలగించు"))
+            {
+                result.Intent = AssistantIntents.DeleteNote;
+                result.Title = ctx.ExtractTitle();
+                return result;
+            }
+            if (ctx.HasAny("show", "list", "search", "दिखाओ", "చూపించు"))
+            {
+                result.Intent = AssistantIntents.SearchNotes;
+                result.Query = ctx.ExtractQuery() ?? ctx.ExtractTitle();
+                return result;
+            }
+            result.Intent = AssistantIntents.CreateNote;
+            result.Title = ctx.ExtractTitle();
+            result.Content = ctx.ExtractContent();
+            result.Tags = ctx.ExtractParticipants();
+            return result;
+        }
+
+        // Tasks (checked before appointments — "create a task for meeting" is a task, not an appointment)
+        if (ctx.HasAny("task", "to-do", "todo", "काम", "కార్యం", "పని", "టాస్క్"))
+        {
+            if (ctx.HasAny("complete", "mark as done", "finish", "completed", "as done", "done", "पूरा", "పూర్తి"))
+            {
+                result.Intent = AssistantIntents.CompleteTask;
+                result.Title = ctx.ExtractTitle();
+                return result;
+            }
+            if (ctx.HasAny("delete", "remove", "हटाओ", "తొలగించు"))
+            {
+                result.Intent = AssistantIntents.DeleteTask;
+                result.Title = ctx.ExtractTitle();
+                return result;
+            }
+            if (ctx.HasAny("show", "list", "my", "मेरे", "జాబితా"))
+            {
+                result.Intent = AssistantIntents.ListTasks;
+                return result;
+            }
+            result.Intent = AssistantIntents.CreateTask;
+            result.Title = ctx.ExtractTitle();
+            result.Description = ctx.ExtractContent();
+            result.Date = DateTimeResolver.ParseDate(ctx);
+            result.Time = DateTimeResolver.ParseTime(ctx);
+            result.Priority = PriorityParser.Parse(ctx);
+            return result;
+        }
+
+        // Appointments / meetings
         if (ctx.HasAny("appointment", "meeting", "schedule a", "book", "अपॉइंटमेंट", "మీటింగ్", "అపాయింట్మెంట్"))
         {
             if (ctx.HasAny("delete", "cancel the meeting", "remove", "हटाओ", "రద్దు", "తొలగించు"))
@@ -131,57 +182,6 @@ public static class Parser
             result.Date = DateTimeResolver.ParseDate(ctx);
             result.Time = DateTimeResolver.ParseTime(ctx);
             result.Recurrence = RecurrenceParser.Parse(ctx);
-            return result;
-        }
-
-        // Tasks
-        if (ctx.HasAny("task", "to-do", "todo", "काम", "కార్యం", "పని", "టాస్క్"))
-        {
-            if (ctx.HasAny("complete", "mark as done", "finish", "completed", "as done", "done", "पूरा", "పూర్తి"))
-            {
-                result.Intent = AssistantIntents.CompleteTask;
-                result.Title = ctx.ExtractTitle();
-                return result;
-            }
-            if (ctx.HasAny("delete", "remove", "हटाओ", "తొలగించు"))
-            {
-                result.Intent = AssistantIntents.DeleteTask;
-                result.Title = ctx.ExtractTitle();
-                return result;
-            }
-            if (ctx.HasAny("show", "list", "my", "मेरे", "జాబితా"))
-            {
-                result.Intent = AssistantIntents.ListTasks;
-                return result;
-            }
-            result.Intent = AssistantIntents.CreateTask;
-            result.Title = ctx.ExtractTitle();
-            result.Description = ctx.ExtractContent();
-            result.Date = DateTimeResolver.ParseDate(ctx);
-            result.Time = DateTimeResolver.ParseTime(ctx);
-            result.Priority = PriorityParser.Parse(ctx);
-            return result;
-        }
-
-        // Notes
-        if (ctx.HasAny("note", "नोट", "గమనిక"))
-        {
-            if (ctx.HasAny("delete", "remove", "हटाओ", "తొలగించు"))
-            {
-                result.Intent = AssistantIntents.DeleteNote;
-                result.Title = ctx.ExtractTitle();
-                return result;
-            }
-            if (ctx.HasAny("show", "list", "search", "दिखाओ", "చూపించు"))
-            {
-                result.Intent = AssistantIntents.SearchNotes;
-                result.Query = ctx.ExtractQuery() ?? ctx.ExtractTitle();
-                return result;
-            }
-            result.Intent = AssistantIntents.CreateNote;
-            result.Title = ctx.ExtractTitle();
-            result.Content = ctx.ExtractContent();
-            result.Tags = ctx.ExtractParticipants();
             return result;
         }
 
