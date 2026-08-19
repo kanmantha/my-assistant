@@ -139,6 +139,5 @@ public class GoogleTtsService : ITextToSpeechService
             _logger.LogError(ex, "TTS parse failure");
             throw new InvalidOperationException("Failed to parse Google TTS response", ex);
         }
-        }
     }
 }
