@@ -168,7 +168,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
     // ─── Client-side intent detection ─────────────────────────────
     final lower = text.toLowerCase();
 
-    // Notes, Tasks, Appointments → show confirmation dialog (skip if voice-confirmed)
+    // Notes, Tasks, Appointments → show confirmation dialog with calendar
     if (_isNoteIntent(lower) || _isTaskIntent(lower) || _isAppointmentIntent(lower)) {
       final detectedType = _isNoteIntent(lower)
           ? 'note'
@@ -860,14 +860,27 @@ class _AssistantScreenState extends State<AssistantScreen> {
       lower.contains('make a note') || lower.contains('set a note') ||
       lower.startsWith('note ');
 
-  bool _isTaskIntent(String lower) =>
-      lower.contains('create a task') || lower.contains('add a task') ||
-      lower.contains('create task') || lower.contains('add task') ||
-      lower.contains('schedule task') || lower.contains('make a task') ||
-      lower.contains('new task') || lower.contains('i need to') ||
-      lower.contains('i have to') || lower.contains('i must') ||
-      lower.contains('got to') || lower.contains('need to do') ||
-      lower.contains('set a task') || lower.contains('set up a task');
+  bool _isTaskIntent(String lower) {
+    if (lower.contains('create a task') || lower.contains('add a task') ||
+        lower.contains('create task') || lower.contains('add task') ||
+        lower.contains('schedule task') || lower.contains('make a task') ||
+        lower.contains('new task') || lower.contains('set a task') ||
+        lower.contains('set up a task') || lower.contains('need to do') ||
+        lower.contains('got to')) {
+      return true;
+    }
+    // "i need to" / "i have to" / "i must" — only if NOT a list/query verb
+    if (lower.contains('i need to') || lower.contains('i have to') ||
+        lower.contains('i must')) {
+      final isQuery = lower.contains('list') || lower.contains('show') ||
+          lower.contains('see') || lower.contains('know') ||
+          lower.contains('check') || lower.contains('what') ||
+          lower.contains('how many') || lower.contains('read') ||
+          lower.contains('today') || lower.contains('schedule');
+      return !isQuery;
+    }
+    return false;
+  }
 
   bool _isAppointmentIntent(String lower) =>
       lower.contains('schedule meeting') || lower.contains('book appointment') ||

@@ -12,6 +12,7 @@ import '../services/tts_service.dart';
 import '../theme.dart';
 import 'assistant_screen.dart';
 import 'notes_screen.dart';
+import 'settings_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -27,6 +28,13 @@ class DashboardScreen extends StatelessWidget {
       appBar: AppBar(
         title: Text(greeting),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+            ),
+          ),
           if (profile != null)
             Padding(
               padding: const EdgeInsets.only(right: 16),

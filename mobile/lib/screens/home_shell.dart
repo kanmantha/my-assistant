@@ -8,7 +8,6 @@ import 'appointments_screen.dart';
 import 'assistant_screen.dart';
 import 'dashboard_screen.dart';
 import 'notes_screen.dart';
-import 'settings_screen.dart';
 import 'tasks_screen.dart';
 import 'today_screen.dart';
 
@@ -30,7 +29,6 @@ class _HomeShellState extends State<HomeShell> {
     AssistantScreen(),
     NotesScreen(),
     AppointmentsScreen(),
-    SettingsScreen(),
   ];
 
   @override
@@ -129,7 +127,6 @@ class _HomeShellState extends State<HomeShell> {
         selectedIndex: _index,
         onDestinationSelected: (i) {
           setState(() => _index = i);
-          // Reload data when switching to a CRUD tab
           if (i == 1) context.read<AppointmentsState>().load();
           if (i == 2) context.read<TasksState>().load();
           if (i == 4) context.read<NotesState>().load();
@@ -142,7 +139,6 @@ class _HomeShellState extends State<HomeShell> {
           NavigationDestination(icon: Icon(Icons.auto_awesome_outlined), selectedIcon: Icon(Icons.auto_awesome), label: 'Assistant'),
           NavigationDestination(icon: Icon(Icons.note_alt_outlined), selectedIcon: Icon(Icons.note_alt), label: 'Notes'),
           NavigationDestination(icon: Icon(Icons.event_outlined), selectedIcon: Icon(Icons.event), label: 'Events'),
-          NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
       floatingActionButton: wake.running
