@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:developer' as dev;
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -150,8 +151,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
     }
 
     _pendingCommand = '';
-    _setState(_VoiceState.idle);
-    _restartWakeWord();
+    if (!mounted) return;
+    // Siri-like: auto-listen for the next command after responding
+    await _listenForCommand();
   }
 
   Future<void> _processCommand(String text) async {
@@ -183,6 +185,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
         title = _extractTaskTitle(text);
         content = '';
         priority = _extractPriority(lower);
+        dateTime = _extractDateTime(text);
       } else {
         title = _extractAppointmentTitle(text);
         content = '';
@@ -216,7 +219,12 @@ class _AssistantScreenState extends State<AssistantScreen> {
         if (result.type == 'note') {
           await context.read<NotesState>().add(result.title, result.content);
         } else if (result.type == 'task') {
-          await context.read<TasksState>().add(result.title, priority: result.priority);
+          await context.read<TasksState>().add(
+            result.title,
+            description: result.content,
+            priority: result.priority,
+            dueDate: result.dateTime?.toIso8601String(),
+          );
         } else {
           final dt = result.dateTime ?? DateTime.now().add(const Duration(hours: 1));
           await context.read<AppointmentsState>().add(
@@ -404,6 +412,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
   }
 
   String _extractPriority(String lower) {
+    if (lower.contains('critical')) return 'Critical';
     if (lower.contains('urgent')) return 'Urgent';
     if (lower.contains('high')) return 'High';
     if (lower.contains('low')) return 'Low';
@@ -755,7 +764,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
               ),
             Expanded(
               child: messages.isEmpty && _partialText.isEmpty
-                  ? _EmptyState(assistant: assistant)
+                  ? _EmptyState(assistant: assistant, listening: assistant.listening)
                   : ListView.builder(
                       controller: _scroll,
                       padding: const EdgeInsets.all(16),
@@ -779,8 +788,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
                 setState(() => _partialText = '');
                 await _processCommand(text);
                 if (!mounted) return;
-                _setState(_VoiceState.idle);
-                _restartWakeWord();
+                // Siri-like: auto-listen for next command after responding
+                _setState(_VoiceState.listeningCommand);
+                await _listenForCommand();
               },
               onMic: _onMicTap,
               onStop: () async {
@@ -800,51 +810,138 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
 // ─── Helper widgets ──────────────────────────────────────────────────
 
-class _EmptyState extends StatelessWidget {
+class _EmptyState extends StatefulWidget {
   final AssistantProvider assistant;
-  const _EmptyState({required this.assistant});
+  final bool listening;
+  const _EmptyState({required this.assistant, this.listening = false});
+
+  @override
+  State<_EmptyState> createState() => _EmptyStateState();
+}
+
+class _EmptyStateState extends State<_EmptyState> with TickerProviderStateMixin {
+  late final AnimationController _pulseController;
+  late final AnimationController _rotateController;
+  late final Animation<double> _pulseAnim;
+  late final Animation<double> _rotateAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500))..repeat(reverse: true);
+    _rotateController = AnimationController(vsync: this, duration: const Duration(seconds: 8))..repeat();
+    _pulseAnim = Tween<double>(begin: 0.8, end: 1.0).animate(CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
+    _rotateAnim = Tween<double>(begin: 0, end: 2 * math.pi).animate(_rotateController);
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    _rotateController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final isListening = widget.listening;
+    final colors = isListening
+        ? [const Color(0xFF10B981), const Color(0xFF34D399), const Color(0xFF6EE7B7)]
+        : [const Color(0xFF6366F1), const Color(0xFF8B5CF6), const Color(0xFFEC4899)];
+    final glowColor = isListening ? const Color(0xFF10B981) : const Color(0xFF6366F1);
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              width: 100, height: 100,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                    colors: [AppTheme.primary, Color(0xFF8A7BFF)]),
-                boxShadow: [
-                  BoxShadow(color: AppTheme.primary.withValues(alpha: 0.4), blurRadius: 30)
-                ],
-              ),
-              child: const Icon(Icons.mic, color: Colors.white, size: 48),
+            AnimatedBuilder(
+              animation: Listenable.merge([_pulseAnim, _rotateAnim]),
+              builder: (context, child) {
+                return Transform.scale(
+                  scale: _pulseAnim.value,
+                  child: Transform.rotate(
+                    angle: _rotateAnim.value,
+                    child: Container(
+                      width: 120, height: 120,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: colors,
+                        ),
+                        boxShadow: [
+                          BoxShadow(color: glowColor.withValues(alpha: 0.5), blurRadius: 40, spreadRadius: 5),
+                          BoxShadow(color: glowColor.withValues(alpha: 0.3), blurRadius: 60, spreadRadius: 10),
+                        ],
+                      ),
+                      child: Icon(
+                        isListening ? Icons.graphic_eq : Icons.mic,
+                        color: Colors.white,
+                        size: 56,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 32),
+            Text(
+              widget.assistant.demoGreeting,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500, height: 1.5),
             ),
             const SizedBox(height: 24),
-            Text(assistant.demoGreeting,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 16, height: 1.5)),
-            const SizedBox(height: 16),
-            Text(
-              'Say "Hey Assistant" to get started.\n\n'
-              'Then try:\n'
-              '• "Schedule a meeting with Ram at 3 PM"\n'
-              '• "Create a task to buy groceries"\n'
-              '• "Remind me to call mom tomorrow"\n'
-              '• "Take a note about project deadline"',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 13,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  height: 1.5),
-            ),
+            _ProactiveSuggestions(),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ProactiveSuggestions extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final hour = DateTime.now().hour;
+    String greeting;
+    List<String> suggestions;
+
+    if (hour < 12) {
+      greeting = 'Good Morning';
+      suggestions = ['Schedule a meeting for today', 'Create a task to review emails', 'Take a note for morning agenda'];
+    } else if (hour < 17) {
+      greeting = 'Good Afternoon';
+      suggestions = ['Schedule a team standup', 'Create a task to send report', 'Remind me about lunch'];
+    } else {
+      greeting = 'Good Evening';
+      suggestions = ['Take a note about today\'s progress', 'Create a task for tomorrow', 'Schedule a meeting for next week'];
+    }
+
+    return Column(
+      children: [
+        Text(greeting, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey.shade600)),
+        const SizedBox(height: 12),
+        ...suggestions.map((s) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.auto_awesome, size: 16, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 12),
+                Expanded(child: Text(s, style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface))),
+              ],
+            ),
+          ),
+        )),
+      ],
     );
   }
 }

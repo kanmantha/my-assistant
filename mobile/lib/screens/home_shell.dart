@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/assistant_provider.dart';
+import '../providers/productivity_providers.dart';
 import '../providers/wake_word_provider.dart';
 import 'appointments_screen.dart';
 import 'assistant_screen.dart';
@@ -124,7 +125,13 @@ class _HomeShellState extends State<HomeShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: (i) {
+          setState(() => _index = i);
+          // Reload data when switching to a CRUD tab
+          if (i == 1) context.read<TasksState>().load();
+          if (i == 3) context.read<NotesState>().load();
+          if (i == 4) context.read<AppointmentsState>().load();
+        },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.checklist_outlined), selectedIcon: Icon(Icons.checklist), label: 'Tasks'),

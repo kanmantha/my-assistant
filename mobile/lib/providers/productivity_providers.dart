@@ -46,9 +46,9 @@ class TasksState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> add(String title, {String description = '', String? priority}) async {
+  Future<void> add(String title, {String description = '', String? priority, String? dueDate}) async {
     try {
-      _tasks.insert(0, await _backend.createTask(title: title, description: description, priority: priority));
+      _tasks.insert(0, await _backend.createTask(title: title, description: description, priority: priority, dueDate: dueDate));
       _error = null;
       notifyListeners();
     } catch (e) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/models.dart';
@@ -17,6 +18,9 @@ class _TasksScreenState extends State<TasksScreen> {
   final _titleCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   String _priority = 'Medium';
+  DateTime _selectedDate = DateTime.now();
+  TimeOfDay _selectedTime = TimeOfDay.now();
+  bool _hasDueDate = false;
 
   @override
   void initState() {
@@ -40,68 +44,119 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
     super.dispose();
   }
 
-  Future<void> _add() async {
-    final title = _titleCtrl.text.trim();
-    if (title.isEmpty) return;
-    try {
-      await context.read<TasksState>().add(title, description: _descCtrl.text.trim(), priority: _priority);
-      if (mounted) {
-        _titleCtrl.clear();
-        _descCtrl.clear();
-        Navigator.of(context).pop();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save task: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
-
   void _showAddSheet() {
     _titleCtrl.clear();
     _descCtrl.clear();
     _priority = 'Medium';
+    _selectedDate = DateTime.now();
+    _selectedTime = TimeOfDay.now();
+    _hasDueDate = false;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text('New Task', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _titleCtrl,
-                decoration: const InputDecoration(labelText: 'Task title'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _descCtrl,
-                decoration: const InputDecoration(labelText: 'Description (optional)'),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _priority,
-                decoration: const InputDecoration(labelText: 'Priority'),
-                items: const [
-                  DropdownMenuItem(value: 'Low', child: Text('Low')),
-                  DropdownMenuItem(value: 'Medium', child: Text('Medium')),
-                  DropdownMenuItem(value: 'High', child: Text('High')),
-                  DropdownMenuItem(value: 'Urgent', child: Text('Urgent')),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          return Padding(
+            padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('New Task', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _titleCtrl,
+                    decoration: const InputDecoration(labelText: 'Task title'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _descCtrl,
+                    decoration: const InputDecoration(labelText: 'Description (optional)'),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: _priority,
+                    decoration: const InputDecoration(labelText: 'Priority'),
+                    items: const [
+                      DropdownMenuItem(value: 'Low', child: Text('Low')),
+                      DropdownMenuItem(value: 'Medium', child: Text('Medium')),
+                      DropdownMenuItem(value: 'High', child: Text('High')),
+                      DropdownMenuItem(value: 'Critical', child: Text('Critical')),
+                      DropdownMenuItem(value: 'Urgent', child: Text('Urgent')),
+                    ],
+                    onChanged: (v) => setSheetState(() => _priority = v ?? 'Medium'),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: ctx,
+                              initialDate: _selectedDate,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2030),
+                            );
+                            if (picked != null) setSheetState(() { _selectedDate = picked; _hasDueDate = true; });
+                          },
+                          icon: const Icon(Icons.calendar_today, size: 16),
+                          label: Text(_hasDueDate ? DateFormat('dd MMM yyyy').format(_selectedDate) : 'Due date'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final picked = await showTimePicker(
+                              context: ctx,
+                              initialTime: _selectedTime,
+                            );
+                            if (picked != null) setSheetState(() { _selectedTime = picked; _hasDueDate = true; });
+                          },
+                          icon: const Icon(Icons.access_time, size: 16),
+                          label: Text(_hasDueDate ? _selectedTime.format(ctx) : 'Due time'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: () async {
+                      final title = _titleCtrl.text.trim();
+                      if (title.isEmpty) return;
+                      String? dueDateStr;
+                      if (_hasDueDate) {
+                        final dt = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, _selectedTime.hour, _selectedTime.minute);
+                        dueDateStr = dt.toIso8601String();
+                      }
+                      try {
+                        await context.read<TasksState>().add(
+                          title,
+                          description: _descCtrl.text.trim(),
+                          priority: _priority,
+                          dueDate: dueDateStr,
+                        );
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      } catch (e) {
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(content: Text('Failed to save task: $e'), backgroundColor: Colors.red),
+                          );
+                        }
+                      }
+                    },
+                    child: const Text('Add Task'),
+                  ),
                 ],
-                onChanged: (v) => setState(() => _priority = v ?? 'Medium'),
               ),
-              const SizedBox(height: 16),
-              ElevatedButton(onPressed: _add, child: const Text('Add Task')),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -150,11 +205,17 @@ class _TaskTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final done = task.status == 'Completed';
     final color = switch (task.priority) {
+      'Critical' => Colors.red.shade900,
       'Urgent' => AppTheme.danger,
       'High' => Colors.deepOrange,
       'Low' => AppTheme.success,
       _ => AppTheme.primary,
     };
+    final subtitleParts = <String>[];
+    if (task.description.isNotEmpty) subtitleParts.add(task.description);
+    if (task.dueDate != null && task.dueDate!.isNotEmpty) {
+      subtitleParts.add('Due: ${task.dueDate}${task.dueTime != null && task.dueTime!.isNotEmpty ? ' at ${task.dueTime}' : ''}');
+    }
     return Card(
       elevation: 0,
       color: Theme.of(context).colorScheme.surface,
@@ -169,7 +230,7 @@ class _TaskTile extends StatelessWidget {
           task.title,
           style: TextStyle(decoration: done ? TextDecoration.lineThrough : null, color: done ? Colors.black38 : null),
         ),
-        subtitle: task.description.isNotEmpty ? Text(task.description, maxLines: 1, overflow: TextOverflow.ellipsis) : null,
+        subtitle: subtitleParts.isNotEmpty ? Text(subtitleParts.join(' — '), maxLines: 1, overflow: TextOverflow.ellipsis) : null,
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [

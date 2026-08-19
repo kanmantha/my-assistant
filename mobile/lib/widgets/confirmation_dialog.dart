@@ -143,6 +143,7 @@ class _ConfirmationDialogState extends State<ConfirmationDialog> {
                   DropdownMenuItem(value: 'Low', child: Text('Low')),
                   DropdownMenuItem(value: 'Medium', child: Text('Medium')),
                   DropdownMenuItem(value: 'High', child: Text('High')),
+                  DropdownMenuItem(value: 'Critical', child: Text('Critical')),
                   DropdownMenuItem(value: 'Urgent', child: Text('Urgent')),
                 ],
                 onChanged: (v) => setState(() => _priority = v ?? 'Medium'),
