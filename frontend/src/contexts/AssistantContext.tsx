@@ -73,39 +73,6 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setMessages((prev) => [...prev.slice(-39), { role, text, timestamp: Date.now() }]);
   }, []);
 
-  // ---------------- Wake word ----------------
-  const onWakeWordDetected = useCallback(
-    async (event: { wakeWord: string; transcript: string }) => {
-      const reply = WAKE_REPLY[settings.language] ?? WAKE_REPLY.en;
-      setStatus("speaking");
-      pushMessage("assistant", reply);
-      tts.speak(reply, settings.language, { rate: settings.speechSpeed, volume: settings.voiceVolume, muted: settings.muteAssistantVoice });
-
-      const command = event.transcript || "What is my schedule today?";
-      if (command) {
-        await text(command, true);
-      }
-    },
-    [settings, pushMessage, tts]
-  );
-
-  const wake = useWakeWord(
-    settings.wakeWord ?? "assistant",
-    wakeEnabled && (status === "idle" || status === "wake-listening"),
-    onWakeWordDetected
-  );
-
-  // Surface a clear message when the wake word is requested but this browser
-  // cannot listen continuously (Firefox/Safari lack Web Speech Recognition),
-  // or when the microphone permission hasn't been granted.
-  useEffect(() => {
-    if (wakeEnabled && !wake.supported) {
-      setErrorMessage("This browser doesn't support always-on wake word detection. Use the mic button or text input instead.");
-    } else if (wake.error) {
-      setErrorMessage(wake.error);
-    }
-  }, [wakeEnabled, wake.supported, wake.error]);
-
   // ---------------- Commands ----------------
   async function sendToBackend(text: string, isVoice: boolean) {
     const payload = {
@@ -116,6 +83,34 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     };
     return assistantApi.command(payload);
   }
+
+  const speakReply = useCallback(
+    async (reply: string, lang?: string) => {
+      return new Promise<void>((resolve) => {
+        const speakLang = lang ?? settings.language;
+        if (!tts.supported || settings.muteAssistantVoice) {
+          resolve();
+          return;
+        }
+        tts.speak(reply, speakLang, {
+          rate: settings.speechSpeed,
+          volume: settings.voiceVolume,
+          muted: settings.muteAssistantVoice
+        });
+        const check = setInterval(() => {
+          if (!tts.speaking) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 200);
+        setTimeout(() => {
+          clearInterval(check);
+          resolve();
+        }, 20000);
+      });
+    },
+    [tts, settings]
+  );
 
   const text = useCallback(
     async (input: string, isVoice = false) => {
@@ -162,34 +157,6 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     [sessionId, settings, pushMessage]
   );
 
-  const speakReply = useCallback(
-    async (reply: string, lang?: string) => {
-      return new Promise<void>((resolve) => {
-        const speakLang = lang ?? settings.language;
-        if (!tts.supported || settings.muteAssistantVoice) {
-          resolve();
-          return;
-        }
-        tts.speak(reply, speakLang, {
-          rate: settings.speechSpeed,
-          volume: settings.voiceVolume,
-          muted: settings.muteAssistantVoice
-        });
-        const check = setInterval(() => {
-          if (!tts.speaking) {
-            clearInterval(check);
-            resolve();
-          }
-        }, 200);
-        setTimeout(() => {
-          clearInterval(check);
-          resolve();
-        }, 20000);
-      });
-    },
-    [tts, settings]
-  );
-
   // ---------------- Voice capture ----------------
   const startListening = useCallback(async () => {
     if (!rec.supported) {
@@ -223,6 +190,40 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       setStatus("idle");
     }
   }, [rec]);
+
+  // ---------------- Wake word ----------------
+  const onWakeWordDetected = useCallback(
+    async (event: { wakeWord: string; transcript: string }) => {
+      const reply = WAKE_REPLY[settings.language] ?? WAKE_REPLY.en;
+      pushMessage("assistant", reply);
+      setStatus("speaking");
+      await speakReply(reply, settings.language);
+
+      if (event.transcript) {
+        await text(event.transcript, true);
+      } else {
+        await startListening();
+      }
+    },
+    [settings, pushMessage, speakReply, text, startListening]
+  );
+
+  const wake = useWakeWord(
+    settings.wakeWord ?? "assistant",
+    wakeEnabled && (status === "idle" || status === "wake-listening"),
+    onWakeWordDetected
+  );
+
+  // Surface a clear message when the wake word is requested but this browser
+  // cannot listen continuously (Firefox/Safari lack Web Speech Recognition),
+  // or when the microphone permission hasn't been granted.
+  useEffect(() => {
+    if (wakeEnabled && !wake.supported) {
+      setErrorMessage("This browser doesn't support always-on wake word detection. Use the mic button or text input instead.");
+    } else if (wake.error) {
+      setErrorMessage(wake.error);
+    }
+  }, [wakeEnabled, wake.supported, wake.error]);
 
   // ---------------- Confirmation ----------------
   const answerConfirmation = useCallback(
