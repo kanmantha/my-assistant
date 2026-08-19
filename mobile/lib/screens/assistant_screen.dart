@@ -44,6 +44,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   _VoiceState _voiceState = _VoiceState.idle;
   String _pendingCommand = '';
+  bool _fromVoiceConfirm = false;
 
   @override
   void initState() {
@@ -147,7 +148,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
         a.contains('sure') || a.contains('ok') || a.contains('confirm') ||
         a.contains('save') || a.contains('correct') || a.contains('right') ||
         a.contains('haan') || a.contains('acha')) {
+      _fromVoiceConfirm = true;
       await _processCommand(_pendingCommand);
+      _fromVoiceConfirm = false;
     } else {
       assistant.addAssistantText('Okay, cancelled.');
       await TtsService.instance.speak('Okay, cancelled.');
@@ -167,7 +170,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
     // ─── Client-side intent detection ─────────────────────────────
     final lower = text.toLowerCase();
 
-    // Notes, Tasks, Appointments → show confirmation dialog
+    // Notes, Tasks, Appointments → show confirmation dialog (skip if voice-confirmed)
     if (_isNoteIntent(lower) || _isTaskIntent(lower) || _isAppointmentIntent(lower)) {
       final detectedType = _isNoteIntent(lower)
           ? 'note'
@@ -195,21 +198,35 @@ class _AssistantScreenState extends State<AssistantScreen> {
         dateTime = _extractDateTime(text);
       }
 
-      final result = await showModalBottomSheet<ConfirmationResult>(
-        context: context,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (_) => ConfirmationDialog(
-          initialType: detectedType,
-          initialTitle: title,
-          initialContent: content,
-          initialPriority: priority,
-          initialDateTime: dateTime,
-          initialLocation: location,
-        ),
-      );
+      ConfirmationResult? result;
+      if (_fromVoiceConfirm) {
+        // Voice already confirmed — save directly without UI dialog
+        result = ConfirmationResult(
+          type: detectedType,
+          title: title,
+          content: content,
+          priority: priority ?? 'Medium',
+          dateTime: dateTime,
+          location: location,
+        );
+      } else {
+        // Text input — show confirmation dialog for editing
+        result = await showModalBottomSheet<ConfirmationResult>(
+          context: context,
+          isScrollControlled: true,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          builder: (_) => ConfirmationDialog(
+            initialType: detectedType,
+            initialTitle: title,
+            initialContent: content,
+            initialPriority: priority,
+            initialDateTime: dateTime,
+            initialLocation: location,
+          ),
+        );
+      }
 
       if (result == null) {
         assistant.addAssistantText('Cancelled.');
