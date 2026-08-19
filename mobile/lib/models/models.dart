@@ -470,3 +470,21 @@ class DashboardData {
         subscription: SubscriptionInfo.fromJson(j['subscription'] as Map<String, dynamic>? ?? {}),
       );
 }
+
+class ConfirmationResult {
+  final String type;
+  final String title;
+  final String content;
+  final String? priority;
+  final DateTime? dateTime;
+  final String? location;
+
+  const ConfirmationResult({
+    required this.type,
+    required this.title,
+    this.content = '',
+    this.priority,
+    this.dateTime,
+    this.location,
+  });
+}

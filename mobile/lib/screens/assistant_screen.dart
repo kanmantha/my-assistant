@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/assistant_provider.dart';
 import '../providers/productivity_providers.dart';
+import '../models/models.dart';
 import '../providers/wake_word_provider.dart';
 import '../services/api_client.dart';
 import '../services/backend_client.dart';
@@ -13,6 +14,7 @@ import '../services/native_speech_service.dart';
 import '../services/speech_service.dart';
 import '../services/tts_service.dart';
 import '../theme.dart';
+import '../widgets/confirmation_dialog.dart';
 
 enum _VoiceState {
   idle,
@@ -160,58 +162,79 @@ class _AssistantScreenState extends State<AssistantScreen> {
     // ─── Client-side intent detection ─────────────────────────────
     final lower = text.toLowerCase();
 
-    // Notes: "take a note", "add note", "note down", "create note"
-    if (_isNoteIntent(lower)) {
-      final title = _extractNoteTitle(text);
-      final content = _extractNoteContent(text);
-      try {
-        await context.read<NotesState>().add(title, content);
-        final msg = 'Note created: "$title"';
-        assistant.addAssistantText(msg);
-        _scrollToBottom();
-        await TtsService.instance.speak(msg);
-      } catch (e) {
-        assistant.addAssistantText('Could not create note: $e');
-        await TtsService.instance.speak('Could not create the note.');
-      }
-      return;
-    }
+    // Notes, Tasks, Appointments → show confirmation dialog
+    if (_isNoteIntent(lower) || _isTaskIntent(lower) || _isAppointmentIntent(lower)) {
+      final detectedType = _isNoteIntent(lower)
+          ? 'note'
+          : _isTaskIntent(lower)
+              ? 'task'
+              : 'appointment';
 
-    // Tasks: "create task", "add task", "schedule task", "make a task"
-    if (_isTaskIntent(lower)) {
-      final title = _extractTaskTitle(text);
-      final priority = _extractPriority(lower);
-      try {
-        await context.read<TasksState>().add(title, priority: priority);
-        final msg = 'Task created: "$title"';
-        assistant.addAssistantText(msg);
-        _scrollToBottom();
-        await TtsService.instance.speak(msg);
-      } catch (e) {
-        assistant.addAssistantText('Could not create task: $e');
-        await TtsService.instance.speak('Could not create the task.');
-      }
-      return;
-    }
+      String title;
+      String content;
+      String? priority;
+      DateTime? dateTime;
+      String? location;
 
-    // Appointments: "schedule meeting", "book appointment", "set up meeting"
-    if (_isAppointmentIntent(lower)) {
-      final title = _extractAppointmentTitle(text);
-      final dt = _extractDateTime(text);
+      if (detectedType == 'note') {
+        title = _extractNoteTitle(text);
+        content = _extractNoteContent(text);
+      } else if (detectedType == 'task') {
+        title = _extractTaskTitle(text);
+        content = '';
+        priority = _extractPriority(lower);
+      } else {
+        title = _extractAppointmentTitle(text);
+        content = '';
+        dateTime = _extractDateTime(text);
+      }
+
+      final result = await showModalBottomSheet<ConfirmationResult>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (_) => ConfirmationDialog(
+          initialType: detectedType,
+          initialTitle: title,
+          initialContent: content,
+          initialPriority: priority,
+          initialDateTime: dateTime,
+          initialLocation: location,
+        ),
+      );
+
+      if (result == null) {
+        assistant.addAssistantText('Cancelled.');
+        _scrollToBottom();
+        return;
+      }
+
       try {
-        await context.read<AppointmentsState>().add(
-          title: title,
-          startDateTime: dt.toIso8601String(),
-          endDateTime: dt.add(const Duration(hours: 1)).toIso8601String(),
-        );
-        final timeStr = '${dt.day}/${dt.month} at ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
-        final msg = 'Appointment "$title" scheduled for $timeStr';
+        if (!mounted) return;
+        if (result.type == 'note') {
+          await context.read<NotesState>().add(result.title, result.content);
+        } else if (result.type == 'task') {
+          await context.read<TasksState>().add(result.title, priority: result.priority);
+        } else {
+          final dt = result.dateTime ?? DateTime.now().add(const Duration(hours: 1));
+          await context.read<AppointmentsState>().add(
+            title: result.title,
+            startDateTime: dt.toIso8601String(),
+            endDateTime: dt.add(const Duration(hours: 1)).toIso8601String(),
+            location: result.location,
+          );
+        }
+        if (!mounted) return;
+        final msg = '${_capitalize(result.type)} created: "${result.title}"';
         assistant.addAssistantText(msg);
         _scrollToBottom();
         await TtsService.instance.speak(msg);
       } catch (e) {
-        assistant.addAssistantText('Could not create appointment: $e');
-        await TtsService.instance.speak('Could not create the appointment.');
+        if (!mounted) return;
+        assistant.addAssistantText('Could not create ${result.type}: $e');
+        await TtsService.instance.speak('Could not create the ${result.type}.');
       }
       return;
     }
@@ -386,6 +409,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
     if (lower.contains('low')) return 'Low';
     return 'Medium';
   }
+
+  String _capitalize(String s) => s[0].toUpperCase() + s.substring(1);
 
   String _extractAppointmentTitle(String text) {
     var t = text.trim().replaceFirst(_apptPrefix, '').trim();
