@@ -27,6 +27,15 @@ const CATEGORIES = [
   { key: "categoryOther", value: "Other" }
 ];
 
+const SECTIONS = [
+  { key: "sectionNotes", value: "Notes" },
+  { key: "sectionTasks", value: "Tasks" },
+  { key: "sectionAppointments", value: "Appointments" },
+  { key: "sectionReminders", value: "Reminders" }
+];
+
+type CaptureKind = "date" | "category" | "section" | "time";
+
 export function AssistantPanel() {
   const assistant = useAssistant();
   const { settings } = useSettings();
@@ -52,6 +61,15 @@ export function AssistantPanel() {
   };
 
   const statusKey = STATUS_TEXT[assistant.status];
+
+  const captureTitle = (type: CaptureKind) =>
+    type === "date"
+      ? t("pickDate", uiLang)
+      : type === "time"
+        ? t("pickTime", uiLang)
+        : type === "section"
+          ? t("pickSection", uiLang)
+          : t("pickCategory", uiLang);
 
   return (
     <div className="flex flex-col items-center px-4 py-6">
@@ -107,13 +125,13 @@ export function AssistantPanel() {
         </div>
       )}
 
-      {/* Guided capture: date picker or category chips */}
+      {/* Guided capture: date picker, time picker, section chips or category chips */}
       {assistant.capture && (
         <div className="glass-card mb-4 w-full max-w-md p-4">
           <p className="mb-3 text-center text-sm font-medium text-slate-700 dark:text-slate-200">
-            {assistant.capture.type === "date" ? t("pickDate", uiLang) : t("pickCategory", uiLang)}
+            {captureTitle(assistant.capture.type)}
           </p>
-          {assistant.capture.type === "date" ? (
+          {assistant.capture.type === "date" && (
             <div className="flex flex-col items-center gap-3">
               <input
                 type="date"
@@ -138,7 +156,53 @@ export function AssistantPanel() {
                 </Button>
               </div>
             </div>
-          ) : (
+          )}
+          {assistant.capture.type === "time" && (
+            <div className="flex flex-col items-center gap-3">
+              <input
+                type="time"
+                defaultValue="09:00"
+                className="input w-full"
+                aria-label={t("pickTime", uiLang)}
+                id="assistant-time-picker"
+              />
+              <div className="flex w-full gap-2">
+                <Button
+                  className="flex-1"
+                  onClick={() => {
+                    const el = document.getElementById("assistant-time-picker") as HTMLInputElement | null;
+                    const value = el?.value ?? "09:00";
+                    void assistant.sendText(value);
+                  }}
+                >
+                  {t("save", uiLang)}
+                </Button>
+                <Button variant="secondary" className="flex-1" onClick={() => void assistant.sendText("skip")}>
+                  {t("skip", uiLang)}
+                </Button>
+              </div>
+            </div>
+          )}
+          {assistant.capture.type === "section" && (
+            <div className="flex flex-wrap justify-center gap-2">
+              {SECTIONS.map((s) => (
+                <button
+                  key={s.value}
+                  className="rounded-full border border-brand-200 bg-brand-50 px-4 py-1.5 text-sm font-medium text-brand-700 transition hover:bg-brand-100 dark:border-brand-800 dark:bg-brand-900/30 dark:text-brand-300 dark:hover:bg-brand-900/60"
+                  onClick={() => void assistant.sendText(s.value)}
+                >
+                  {t(s.key, uiLang)}
+                </button>
+              ))}
+              <button
+                className="rounded-full border border-slate-200 px-4 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+                onClick={() => void assistant.sendText("skip")}
+              >
+                {t("skip", uiLang)}
+              </button>
+            </div>
+          )}
+          {assistant.capture.type === "category" && (
             <div className="flex flex-wrap justify-center gap-2">
               {CATEGORIES.map((c) => (
                 <button

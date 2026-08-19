@@ -138,6 +138,18 @@ public partial class DateTimeParserService : IDateTimeParser
 
             if (lower.Contains("next week")) return (now.Date.AddDays(7), true);
 
+            var isoDate = Regex.Match(lower, @"\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b");
+            if (isoDate.Success &&
+                int.TryParse(isoDate.Groups[1].Value, out var isoYear) &&
+                int.TryParse(isoDate.Groups[2].Value, out var isoMonth) &&
+                int.TryParse(isoDate.Groups[3].Value, out var isoDay))
+            {
+                if (DateTime.TryParse($"{isoYear:0000}-{isoMonth:00}-{isoDay:00}", CultureInfo.InvariantCulture, DateTimeStyles.None, out var isoDt))
+                {
+                    return (isoDt.Date, true);
+                }
+            }
+
             var explicitDate = Regex.Match(lower, @"\b(\d{1,2})[-/](\d{1,2})([-/](\d{2,4}))?\b");
             if (explicitDate.Success)
             {
@@ -191,7 +203,7 @@ public partial class DateTimeParserService : IDateTimeParser
         Match m;
         if (lang == "en")
         {
-            m = Regex.Match(lower, @"\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?|am|pm)?\b");
+            m = Regex.Match(lower, @"(?<![\d\-/])\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?|am|pm)?\b(?!\s*[-/]\s*\d)");
             if (m.Success && int.TryParse(m.Groups[1].Value, out var hour))
             {
                 var minute = m.Groups[2].Success ? int.Parse(m.Groups[2].Value) : 0;
@@ -205,6 +217,11 @@ public partial class DateTimeParserService : IDateTimeParser
                 if (periodTime.HasValue) return (null, periodTime, true);
                 if (hour <= 12)
                 {
+                    return (null, new TimeOnly(hour, minute), true);
+                }
+                if (hour <= 23)
+                {
+                    // 24-hour clock (13:00 - 23:59).
                     return (null, new TimeOnly(hour, minute), true);
                 }
             }

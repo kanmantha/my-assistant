@@ -25,7 +25,7 @@ interface AssistantContextValue {
   micSupported: boolean;
   errorMessage: string | null;
   confirmation: { text: string; pendingAction?: string } | null;
-  capture: { type: "date" | "category" } | null;
+  capture: { type: "date" | "category" | "section" | "time" } | null;
   wakeListening: boolean;
   wakeEnabled: boolean;
   speaking: boolean;
@@ -68,7 +68,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<{ text: string; pendingAction?: string } | null>(null);
-  const [capture, setCapture] = useState<{ type: "date" | "category" } | null>(null);
+  const [capture, setCapture] = useState<{ type: "date" | "category" | "section" | "time" } | null>(null);
   const [wakeEnabled, setWakeEnabled] = useState(settings.wakeWordEnabled);
   const [voiceOverlayOpen, setVoiceOverlayOpen] = useState(false);
 
@@ -144,7 +144,12 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
         }
         const reply = res.reply ?? "Done.";
         pushMessage("assistant", reply);
-        if (res.captureType === "date" || res.captureType === "category") {
+        if (
+          res.captureType === "date" ||
+          res.captureType === "category" ||
+          res.captureType === "section" ||
+          res.captureType === "time"
+        ) {
           setCapture({ type: res.captureType });
           setConfirmation(null);
           setStatus("idle");

@@ -1,4 +1,5 @@
 export { DashboardPage } from "./DashboardPage";
+export { TodayPage } from "./TodayPage";
 export { TasksPage } from "./TasksPage";
 export { NotesPage } from "./NotesPage";
 export { RemindersPage } from "./RemindersPage";

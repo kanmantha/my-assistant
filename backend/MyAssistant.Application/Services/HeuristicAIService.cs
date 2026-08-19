@@ -119,6 +119,7 @@ public class HeuristicAIService : IAssistantAIService
         {
             parsed.Intent = AssistantIntent.Weather;
             parsed.Title = t;
+            parsed.Location = ExtractWeatherLocation(t, lang);
             return parsed;
         }
 
@@ -292,6 +293,27 @@ public class HeuristicAIService : IAssistantAIService
         return text;
     }
 
+    private static string ExtractWeatherLocation(string text, string lang)
+    {
+        if (lang == "hi")
+        {
+            var match = Regex.Match(text, @"(?:का\s+)?मौसम.*?(?:में|की|का)\s+([\w\s]+?)\s*(?:कैसा|क्या|है|\?|$)", RegexOptions.IgnoreCase);
+            if (!match.Success) match = Regex.Match(text, @"(?:में|की|का)\s+([\w\s]+?)\s*(?:का\s+मौसम|कैसा|है|\?|$)", RegexOptions.IgnoreCase);
+            if (match.Success) return CleanTitle(match.Groups[1].Value.Trim(), lang);
+        }
+        else if (lang == "te")
+        {
+            var match = Regex.Match(text, @"(?:లో|లోని)\s+([\w\s]+?)\s*(?:వాతావరణం|ఎలా|ఏమిటి|\?|$)", RegexOptions.IgnoreCase);
+            if (match.Success) return CleanTitle(match.Groups[1].Value.Trim(), lang);
+        }
+        else
+        {
+            var match = Regex.Match(text, @"\b(?:in|at|for|of)\s+([A-Za-z][A-Za-z\s-]{1,40}?)\s*(?:weather|forecast|temperature|\?|$)", RegexOptions.IgnoreCase);
+            if (match.Success) return CleanTitle(match.Groups[1].Value.Trim(), lang);
+        }
+        return string.Empty;
+    }
+
     private static bool IsChangeLanguage(string text, string lang, out string newLang)
     {
         newLang = "en-IN";
@@ -392,6 +414,15 @@ public class HeuristicAIService : IAssistantAIService
         }
         else
         {
+            if (lower.Contains("tomorrow") && (lower.Contains("events") || lower.Contains("agenda")))
+            {
+                tomorrow = true;
+                return true;
+            }
+            if (lower.Contains("events") || lower.Contains("agenda") || lower.Contains("on my calendar"))
+            {
+                return true;
+            }
             if (lower.Contains("tomorrow")) { tomorrow = true; return true; }
             if (lower.Contains("today") && (lower.Contains("schedule") || lower.Contains("plan") || lower.Contains("scheduled") || lower.Contains("tasks today")))
             {

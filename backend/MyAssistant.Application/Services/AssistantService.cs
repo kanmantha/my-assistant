@@ -35,6 +35,7 @@ public class AssistantService : IAssistantIntentService
     private readonly IReminderService _reminders;
     private readonly IAppointmentService _appointments;
     private readonly ISearchService _search;
+    private readonly IExternalKnowledgeService _external;
 
     public AssistantService(
         IAssistantAIService ai,
@@ -49,7 +50,8 @@ public class AssistantService : IAssistantIntentService
         ITaskService tasks,
         IReminderService reminders,
         IAppointmentService appointments,
-        ISearchService search)
+        ISearchService search,
+        IExternalKnowledgeService? external = null)
     {
         _ai = ai;
         _sessions = sessions;
@@ -64,6 +66,9 @@ public class AssistantService : IAssistantIntentService
         _reminders = reminders;
         _appointments = appointments;
         _search = search;
+        _external = external ?? new ExternalKnowledgeService(
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ExternalKnowledgeService>.Instance);
     }
 
     public async Task<AssistantResponse> ProcessAsync(AssistantRequest request, Guid userId, CancellationToken cancellationToken = default)
@@ -97,9 +102,10 @@ public class AssistantService : IAssistantIntentService
         await _subscription.RecordUsageAsync(userId, UsageType.AiCommand, request.Text, cancellationToken);
 
         var pending = _sessions.Get(userId, sessionId);
-        if (pending is not null && pending.Stage is >= 2 and <= 5)
+        if (pending is not null && pending.Stage is >= 2 and <= 7)
         {
-            // Multi-turn guided capture: date (4), category (5), note content (2), task/appointment title (3).
+            // Multi-turn guided capture: section (6), date (4), time (7), category (5),
+            // note content (2), task/appointment title (3).
             var text = request.Text?.Trim() ?? string.Empty;
 
             // Cancellation always wins.
@@ -112,10 +118,12 @@ public class AssistantService : IAssistantIntentService
             }
 
             // "skip" / "none" keeps an optional field unset and advances to the next capture.
-            if (pending.Stage is 4 or 5 && IsSkip(text))
+            if (pending.Stage is 4 or 5 or 6 or 7 && IsSkip(text))
             {
                 if (pending.Stage == 4) pending.Command.DateSkipped = true;
-                else pending.Command.CategorySkipped = true;
+                else if (pending.Stage == 5) pending.Command.CategorySkipped = true;
+                else if (pending.Stage == 6) pending.Command.SectionSkipped = true;
+                else pending.Command.TimeSkipped = true;
                 var nextSkip = NextCaptureStage(pending.Command);
                 if (nextSkip is null)
                 {
@@ -128,6 +136,53 @@ public class AssistantService : IAssistantIntentService
                 _sessions.Set(userId, sessionId, pending);
                 var askSkip = CapturePrompt(nextSkip.Value, pending.Command.Intent, language);
                 return BuildResponse(askSkip, pending.Command.Intent, language, captureType: CaptureTypeForStage(nextSkip.Value));
+            }
+
+            // Section capture: choose which tab (Notes/Tasks/Appointments) to save under and echo it back.
+            if (pending.Stage == 6)
+            {
+                var sectionIntent = ResolveSectionWord(text);
+                if (sectionIntent is not null)
+                {
+                    var echo = AssistantReplies.SectionEcho(SectionLabel(sectionIntent.Value), language);
+                    pending.Command.Intent = sectionIntent.Value;
+                    pending.Command.Section = SectionLabel(sectionIntent.Value);
+                    var nextSection = NextCaptureStage(pending.Command);
+                    if (nextSection is null)
+                    {
+                        _sessions.Clear(userId, sessionId);
+                        var doneSection = await ExecuteCapturedAsync(userId, pending.Command, language, tz, request, sessionId, cancellationToken);
+                        await RecordConversationAsync(userId, request, doneSection.Reply ?? string.Empty, pending.Command.Intent.ToString(), language, cancellationToken);
+                        return doneSection;
+                    }
+                    pending.Stage = nextSection.Value;
+                    _sessions.Set(userId, sessionId, pending);
+                    var askSection = CapturePrompt(nextSection.Value, pending.Command.Intent, language);
+                    return BuildResponse($"{echo} {askSection}", pending.Command.Intent, language, captureType: CaptureTypeForStage(nextSection.Value));
+                }
+            }
+
+            // Time capture: accept any time phrase even though the AI might label it a schedule intent.
+            if (pending.Stage == 7 &&
+                command.Intent is AssistantIntent.Unknown or AssistantIntent.TodaySchedule or AssistantIntent.TomorrowSchedule)
+            {
+                var parsedTime = await _dateTimeParser.ParseAsync(text, language, tz, cancellationToken);
+                if (parsedTime.HasTime && parsedTime.DateTime.HasValue)
+                {
+                    pending.Command.Time = TimeOnly.FromDateTime(parsedTime.DateTime.Value);
+                    var nextTime = NextCaptureStage(pending.Command);
+                    if (nextTime is null)
+                    {
+                        _sessions.Clear(userId, sessionId);
+                        var resultTime = await ExecuteCapturedAsync(userId, pending.Command, language, tz, request, sessionId, cancellationToken);
+                        await RecordConversationAsync(userId, request, resultTime.Reply ?? string.Empty, pending.Command.Intent.ToString(), language, cancellationToken);
+                        return resultTime;
+                    }
+                    pending.Stage = nextTime.Value;
+                    _sessions.Set(userId, sessionId, pending);
+                    var askTime = CapturePrompt(nextTime.Value, pending.Command.Intent, language);
+                    return BuildResponse(askTime, pending.Command.Intent, language, captureType: CaptureTypeForStage(nextTime.Value));
+                }
             }
 
             // Date capture: accept any phrase the date parser understands (e.g. "tomorrow")
@@ -213,21 +268,62 @@ public class AssistantService : IAssistantIntentService
                         var askDate = CapturePrompt(nextDate.Value, pending.Command.Intent, language);
                         return BuildResponse(askDate, pending.Command.Intent, language, captureType: CaptureTypeForStage(nextDate.Value));
                     }
-                case 5: // capture category (fallback)
+                case 5: // capture category (fallback — a free-form answer is the actual content/title)
                     {
-                        pending.Command.Category = NormalizeCategory(text);
-                        var nextCat = NextCaptureStage(pending.Command);
-                        if (nextCat is null)
+                        _sessions.Clear(userId, sessionId);
+                        if (pending.Command.Intent == AssistantIntent.CreateNote)
                         {
-                            _sessions.Clear(userId, sessionId);
-                            var resultCat = await ExecuteCapturedAsync(userId, pending.Command, language, tz, request, sessionId, cancellationToken);
-                            await RecordConversationAsync(userId, request, resultCat.Reply ?? string.Empty, pending.Command.Intent.ToString(), language, cancellationToken);
-                            return resultCat;
+                            pending.Command.Content = text;
+                            pending.Command.Title = string.IsNullOrWhiteSpace(pending.Command.Title)
+                                ? (text.Length > 120 ? text[..120] : text)
+                                : pending.Command.Title;
+                            var resultNote = await CreateNoteCoreAsync(userId, pending.Command, language, request, cancellationToken, sessionId, confirmFirst: true);
+                            await RecordConversationAsync(userId, request, resultNote.Reply ?? string.Empty, AssistantIntent.CreateNote.ToString(), language, cancellationToken);
+                            return resultNote;
                         }
-                        pending.Stage = nextCat.Value;
-                        _sessions.Set(userId, sessionId, pending);
-                        var askCat = CapturePrompt(nextCat.Value, pending.Command.Intent, language);
-                        return BuildResponse(askCat, pending.Command.Intent, language, captureType: CaptureTypeForStage(nextCat.Value));
+                        pending.Command.Title = text.Length > 200 ? text[..200] : text;
+                        if (pending.Command.Intent == AssistantIntent.CreateAppointment)
+                        {
+                            var resultAppt = await CreateAppointmentCoreAsync(userId, pending.Command, language, tz, request, sessionId, cancellationToken, confirmFirst: true);
+                            await RecordConversationAsync(userId, request, resultAppt.Reply ?? string.Empty, AssistantIntent.CreateAppointment.ToString(), language, cancellationToken);
+                            return resultAppt;
+                        }
+                        if (pending.Command.Intent == AssistantIntent.CreateReminder)
+                        {
+                            var resultRem = await CreateReminderCoreAsync(userId, pending.Command, language, tz, request, cancellationToken);
+                            await RecordConversationAsync(userId, request, resultRem.Reply ?? string.Empty, AssistantIntent.CreateReminder.ToString(), language, cancellationToken);
+                            return resultRem;
+                        }
+                        var resultTask = await CreateTaskCoreAsync(userId, pending.Command, language, request, cancellationToken, sessionId, confirmFirst: true);
+                        await RecordConversationAsync(userId, request, resultTask.Reply ?? string.Empty, AssistantIntent.CreateTask.ToString(), language, cancellationToken);
+                        return resultTask;
+                    }
+                case 6: // capture section (fallback — re-ask)
+                    {
+                        var askSectionAgain = AssistantReplies.AskSection(language);
+                        return BuildResponse(askSectionAgain, pending.Command.Intent, language, captureType: CaptureTypeForStage(6));
+                    }
+                case 7: // capture time (fallback)
+                    {
+                        var parsedT = await _dateTimeParser.ParseAsync(text, language, tz, cancellationToken);
+                        if (parsedT.HasTime && parsedT.DateTime.HasValue)
+                        {
+                            pending.Command.Time = TimeOnly.FromDateTime(parsedT.DateTime.Value);
+                            var nextT = NextCaptureStage(pending.Command);
+                            if (nextT is null)
+                            {
+                                _sessions.Clear(userId, sessionId);
+                                var resultT = await ExecuteCapturedAsync(userId, pending.Command, language, tz, request, sessionId, cancellationToken);
+                                await RecordConversationAsync(userId, request, resultT.Reply ?? string.Empty, pending.Command.Intent.ToString(), language, cancellationToken);
+                                return resultT;
+                            }
+                            pending.Stage = nextT.Value;
+                            _sessions.Set(userId, sessionId, pending);
+                            var askT = CapturePrompt(nextT.Value, pending.Command.Intent, language);
+                            return BuildResponse(askT, pending.Command.Intent, language, captureType: CaptureTypeForStage(nextT.Value));
+                        }
+                        var askTimeAgain = AssistantReplies.AskTime(language);
+                        return BuildResponse(askTimeAgain, pending.Command.Intent, language, captureType: CaptureTypeForStage(7));
                     }
                 case 2: // capture note content
                     {
@@ -236,7 +332,7 @@ public class AssistantService : IAssistantIntentService
                         pending.Command.Title = string.IsNullOrWhiteSpace(pending.Command.Title)
                             ? (text.Length > 120 ? text[..120] : text)
                             : pending.Command.Title;
-                        var resultNote = await CreateNoteCoreAsync(userId, pending.Command, language, request, cancellationToken);
+                        var resultNote = await CreateNoteCoreAsync(userId, pending.Command, language, request, cancellationToken, sessionId, confirmFirst: true);
                         await RecordConversationAsync(userId, request, resultNote.Reply ?? string.Empty, AssistantIntent.CreateNote.ToString(), language, cancellationToken);
                         return resultNote;
                     }
@@ -250,7 +346,7 @@ public class AssistantService : IAssistantIntentService
                             await RecordConversationAsync(userId, request, resultAppt.Reply ?? string.Empty, AssistantIntent.CreateAppointment.ToString(), language, cancellationToken);
                             return resultAppt;
                         }
-                        var resultTask = await CreateTaskCoreAsync(userId, pending.Command, language, request, cancellationToken);
+                        var resultTask = await CreateTaskCoreAsync(userId, pending.Command, language, request, cancellationToken, sessionId, confirmFirst: true);
                         await RecordConversationAsync(userId, request, resultTask.Reply ?? string.Empty, AssistantIntent.CreateTask.ToString(), language, cancellationToken);
                         return resultTask;
                     }
@@ -310,7 +406,7 @@ case AssistantIntent.CreateNote:
                         return await FinalizeAsync(userId, request, CapturePrompt(noteStart.Value, cmd.Intent, language), language, cmd, ct, captureType: CaptureTypeForStage(noteStart.Value));
                     }
                 }
-                return await CreateNoteCoreAsync(userId, cmd, language, request, ct);
+                return await CreateNoteCoreAsync(userId, cmd, language, request, ct, sessionId, confirmFirst: true);
 
             case AssistantIntent.CreateTask:
                 if (string.IsNullOrWhiteSpace(cmd.Title))
@@ -322,7 +418,7 @@ case AssistantIntent.CreateNote:
                         return await FinalizeAsync(userId, request, CapturePrompt(taskStart.Value, cmd.Intent, language), language, cmd, ct, captureType: CaptureTypeForStage(taskStart.Value));
                     }
                 }
-                return await CreateTaskCoreAsync(userId, cmd, language, request, ct);
+                return await CreateTaskCoreAsync(userId, cmd, language, request, ct, sessionId, confirmFirst: true);
 
             case AssistantIntent.CreateAppointment:
                 {
@@ -334,6 +430,18 @@ case AssistantIntent.CreateNote:
                     }
                     return await CreateAppointmentCoreAsync(userId, cmd, language, tz, request, sessionId, ct, confirmFirst: true);
                 }
+
+            case AssistantIntent.CreateReminder:
+                if (string.IsNullOrWhiteSpace(cmd.Title))
+                {
+                    var remStart = NextCaptureStage(cmd);
+                    if (remStart is not null)
+                    {
+                        _sessions.Set(userId, sessionId, new PendingAction { Command = cmd, SessionId = sessionId, Stage = remStart.Value });
+                        return await FinalizeAsync(userId, request, CapturePrompt(remStart.Value, cmd.Intent, language), language, cmd, ct, captureType: CaptureTypeForStage(remStart.Value));
+                    }
+                }
+                return await CreateReminderCoreAsync(userId, cmd, language, tz, request, ct);
 
             case AssistantIntent.CompleteTask:
                 return await CompleteTaskCoreAsync(userId, cmd, language, request, sessionId, ct, confirmFirst: true);
@@ -403,6 +511,12 @@ case AssistantIntent.CreateNote:
         {
             AssistantIntent.CreateAppointment =>
                 await CreateAppointmentCoreAsync(userId, cmd, language, tz, new AssistantRequest { Text = cmd.Title ?? string.Empty, SessionId = "confirm" }, "confirm", ct, confirmFirst: false),
+            AssistantIntent.CreateNote =>
+                await CreateNoteCoreAsync(userId, cmd, language, new AssistantRequest { Text = cmd.Title ?? string.Empty, SessionId = "confirm" }, ct, "confirm", confirmFirst: false),
+            AssistantIntent.CreateTask =>
+                await CreateTaskCoreAsync(userId, cmd, language, new AssistantRequest { Text = cmd.Title ?? string.Empty, SessionId = "confirm" }, ct, "confirm", confirmFirst: false),
+            AssistantIntent.CreateReminder =>
+                await CreateReminderCoreAsync(userId, cmd, language, tz, new AssistantRequest { Text = cmd.Title ?? string.Empty, SessionId = "confirm" }, ct),
             AssistantIntent.CompleteTask =>
                 await CompleteTaskCoreAsync(userId, cmd, language, new AssistantRequest { Text = cmd.Title ?? string.Empty, SessionId = "confirm" }, "confirm", ct, confirmFirst: false),
             AssistantIntent.DeleteTask or AssistantIntent.DeleteNote or AssistantIntent.DeleteReminder or AssistantIntent.DeleteAppointment =>
@@ -414,12 +528,20 @@ case AssistantIntent.CreateNote:
     // ---------------------------------------------------------------
     // Create Note
     // ---------------------------------------------------------------
-    private async Task<AssistantResponse> CreateNoteCoreAsync(Guid userId, ParsedCommand cmd, string language, AssistantRequest request, CancellationToken ct)
+    private async Task<AssistantResponse> CreateNoteCoreAsync(Guid userId, ParsedCommand cmd, string language, AssistantRequest request, CancellationToken ct, string sessionId = "confirm", bool confirmFirst = false)
     {
         var title = string.IsNullOrWhiteSpace(cmd.Title) ? cmd.Content ?? "Untitled note" : cmd.Title;
         if (title.Length > 120)
         {
             title = title[..120];
+        }
+
+        if (confirmFirst)
+        {
+            var section = SectionNameForPrompt(cmd, language);
+            var message = ConfirmationPrompt(language, $"save this note under {section}");
+            _sessions.Set(userId, sessionId, new PendingAction { Command = cmd, SessionId = sessionId, Stage = 1 });
+            return BuildResponse(message, AssistantIntent.CreateNote, language, requiresConfirmation: true, confirmationPrompt: message, pendingAction: AssistantIntent.CreateNote.ToString());
         }
 
         var created = await _notes.CreateAsync(userId, new CreateNoteRequest
@@ -436,8 +558,17 @@ case AssistantIntent.CreateNote:
     // ---------------------------------------------------------------
     // Create Task
     // ---------------------------------------------------------------
-    private async Task<AssistantResponse> CreateTaskCoreAsync(Guid userId, ParsedCommand cmd, string language, AssistantRequest request, CancellationToken ct)
+    private async Task<AssistantResponse> CreateTaskCoreAsync(Guid userId, ParsedCommand cmd, string language, AssistantRequest request, CancellationToken ct, string sessionId = "confirm", bool confirmFirst = false)
     {
+        if (confirmFirst)
+        {
+            var taskTitle = string.IsNullOrWhiteSpace(cmd.Title) ? "new task" : cmd.Title;
+            var section = SectionNameForPrompt(cmd, language);
+            var message = ConfirmationPrompt(language, $"add the task \"{taskTitle}\" under {section}");
+            _sessions.Set(userId, sessionId, new PendingAction { Command = cmd, SessionId = sessionId, Stage = 1 });
+            return BuildResponse(message, AssistantIntent.CreateTask, language, requiresConfirmation: true, confirmationPrompt: message, pendingAction: AssistantIntent.CreateTask.ToString());
+        }
+
         var created = await _tasks.CreateAsync(userId, new CreateTaskRequest
         {
             Title = string.IsNullOrWhiteSpace(cmd.Title) ? "New task" : cmd.Title,
@@ -627,21 +758,108 @@ case AssistantIntent.CreateNote:
         Guid userId, ParsedCommand cmd, string language, AssistantRequest request, CancellationToken ct)
     {
         var question = cmd.Title ?? request.Text ?? string.Empty;
-        string answer;
-        try
+        string? answer = null;
+
+        // Live data first (no API key required) for weather and web search.
+        if (cmd.Intent == AssistantIntent.Weather)
         {
-            answer = await _ai.AnswerQuestionAsync(question, language, ct);
+            var weather = await _external.GetWeatherAsync(cmd.Location ?? question, ct);
+            if (weather is not null)
+            {
+                answer = FormatWeather(language, weather);
+            }
         }
-        catch (Exception ex)
+        else if (cmd.Intent == AssistantIntent.WebSearch)
         {
-            _logger.LogWarning(ex, "AI provider failed for general question: {Question}", question);
-            answer = AssistantReplies.NotUnderstood(language);
+            var summary = await _external.SearchWebAsync(cmd.SearchQuery ?? question, ct);
+            if (!string.IsNullOrWhiteSpace(summary))
+            {
+                answer = FormatSearchResult(language, summary);
+            }
         }
+
+        if (string.IsNullOrWhiteSpace(answer))
+        {
+            try
+            {
+                answer = await _ai.AnswerQuestionAsync(question, language, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AI provider failed for general question: {Question}", question);
+                answer = null;
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(answer))
         {
             answer = AssistantReplies.NotUnderstood(language);
         }
         return await FinalizeAsync(userId, request, answer, language, cmd, ct);
+    }
+
+    private static string FormatWeather(string lang, WeatherInfo w)
+    {
+        var temp = double.IsNaN(w.TemperatureC) ? 0 : Math.Round(w.TemperatureC);
+        var wind = double.IsNaN(w.WindKmh) ? 0 : Math.Round(w.WindKmh);
+        var condition = WeatherCodeText(lang, w.WeatherCode);
+        return lang switch
+        {
+            "hi-IN" => $"अभी {w.Location} में {temp}°C है, {condition}। हवा {wind} किमी/घंटा है।",
+            "te-IN" => $"ఇప్పుడు {w.Location}లో {temp}°C ఉంది, {condition}। గాలి {wind} కిమీ/గం ఉంది.",
+            _ => $"Right now in {w.Location} it is {temp}°C with {condition}. Wind is {wind} km/h."
+        };
+    }
+
+    private static string FormatSearchResult(string lang, string summary)
+    {
+        return lang switch
+        {
+            "hi-IN" => $"यहाँ कुछ जानकारी है: {summary}",
+            "te-IN" => $"ఇక్కడ కొంత సమాచారం ఉంది: {summary}",
+            _ => $"Here's what I found: {summary}"
+        };
+    }
+
+    private static string WeatherCodeText(string lang, int code)
+    {
+        var text = code switch
+        {
+            0 => "clear sky",
+            1 or 2 or 3 => "partly cloudy",
+            45 or 48 => "foggy",
+            51 or 53 or 55 or 56 or 57 => "drizzle",
+            61 or 63 or 65 or 66 or 67 or 80 or 81 or 82 => "rain",
+            71 or 73 or 75 or 77 or 85 or 86 => "snow",
+            95 or 96 or 99 => "thunderstorms",
+            _ => "varied weather"
+        };
+        return lang switch
+        {
+            "hi-IN" => text switch
+            {
+                "clear sky" => "आसमान साफ है",
+                "partly cloudy" => "आंशिक बादल हैं",
+                "foggy" => "कोहरा है",
+                "drizzle" => "बूंदाबांदी है",
+                "rain" => "बारिश हो रही है",
+                "snow" => "बर्फबारी है",
+                "thunderstorms" => "आंधी-तूफान है",
+                _ => "मौसम बदलता रहता है"
+            },
+            "te-IN" => text switch
+            {
+                "clear sky" => "ఆకాశం స్పష్టంగా ఉంది",
+                "partly cloudy" => "పాక్షికంగా మేఘావృతమైంది",
+                "foggy" => "పొగమంచు ఉంది",
+                "drizzle" => "చిన్న చినుకులు",
+                "rain" => "వర్షం పడుతోంది",
+                "snow" => "మంచు కురుస్తోంది",
+                "thunderstorms" => "ఉరుములతో కూడిన తుఫాను",
+                _ => "మారుతున్న వాతావరణం"
+            },
+            _ => text
+        };
     }
 
     // ---------------------------------------------------------------
@@ -722,16 +940,27 @@ case AssistantIntent.CreateNote:
         switch (cmd.Intent)
         {
             case AssistantIntent.CreateNote:
+                // A bare "add note" asks which tab first; fully specified notes skip the section.
+                if (string.IsNullOrWhiteSpace(cmd.Section) && !cmd.SectionSkipped &&
+                    string.IsNullOrWhiteSpace(cmd.Title) && string.IsNullOrWhiteSpace(cmd.Content)) return 6;
                 if (string.IsNullOrWhiteSpace(cmd.Category) && !cmd.CategorySkipped) return 5;
                 if (string.IsNullOrWhiteSpace(cmd.Content)) return 2;
                 return null;
             case AssistantIntent.CreateTask:
+                if (string.IsNullOrWhiteSpace(cmd.Section) && !cmd.SectionSkipped && string.IsNullOrWhiteSpace(cmd.Title)) return 6;
                 if (cmd.Date is null && !cmd.DateSkipped) return 4;
+                if (cmd.Time is null && !cmd.TimeSkipped) return 7;
                 if (string.IsNullOrWhiteSpace(cmd.Category) && !cmd.CategorySkipped) return 5;
                 if (string.IsNullOrWhiteSpace(cmd.Title)) return 3;
                 return null;
             case AssistantIntent.CreateAppointment:
                 if (cmd.Date is null && !cmd.DateSkipped) return 4;
+                if (cmd.Time is null && !cmd.TimeSkipped) return 7;
+                if (string.IsNullOrWhiteSpace(cmd.Title)) return 3;
+                return null;
+            case AssistantIntent.CreateReminder:
+                if (cmd.Date is null && !cmd.DateSkipped) return 4;
+                if (cmd.Time is null && !cmd.TimeSkipped) return 7;
                 if (string.IsNullOrWhiteSpace(cmd.Title)) return 3;
                 return null;
             default:
@@ -743,6 +972,8 @@ case AssistantIntent.CreateNote:
     {
         4 => AssistantReplies.AskDate(lang),
         5 => AssistantReplies.AskCategory(lang),
+        6 => AssistantReplies.AskSection(lang),
+        7 => AssistantReplies.AskTime(lang),
         2 => AssistantReplies.AskNoteContent(lang),
         3 => intent == AssistantIntent.CreateAppointment ? AssistantReplies.AskMeetingTitle(lang) : AssistantReplies.AskTaskTitle(lang),
         _ => AssistantReplies.NotUnderstood(lang)
@@ -752,6 +983,8 @@ case AssistantIntent.CreateNote:
     {
         4 => "date",
         5 => "category",
+        6 => "section",
+        7 => "time",
         _ => "text"
     };
 
@@ -760,9 +993,10 @@ case AssistantIntent.CreateNote:
     {
         return cmd.Intent switch
         {
-            AssistantIntent.CreateNote => await CreateNoteCoreAsync(userId, cmd, language, request, ct),
-            AssistantIntent.CreateTask => await CreateTaskCoreAsync(userId, cmd, language, request, ct),
+            AssistantIntent.CreateNote => await CreateNoteCoreAsync(userId, cmd, language, request, ct, sessionId, confirmFirst: true),
+            AssistantIntent.CreateTask => await CreateTaskCoreAsync(userId, cmd, language, request, ct, sessionId, confirmFirst: true),
             AssistantIntent.CreateAppointment => await CreateAppointmentCoreAsync(userId, cmd, language, tz, request, sessionId, ct, confirmFirst: true),
+            AssistantIntent.CreateReminder => await CreateReminderCoreAsync(userId, cmd, language, tz, request, ct),
             _ => await FinalizeAsync(userId, request, AssistantReplies.NotUnderstood(language), language, cmd, ct)
         };
     }
@@ -810,6 +1044,30 @@ case AssistantIntent.CreateNote:
     {
         if (string.IsNullOrWhiteSpace(input)) return input;
         return char.ToUpperInvariant(input[0]) + input[1..];
+    }
+
+    private static AssistantIntent? ResolveSectionWord(string text)
+    {
+        var lower = text.Trim().ToLowerInvariant();
+        if (lower is "notes" or "note" or "नोट" or "नोट्स" or "నోట్" or "నోట్స్") return AssistantIntent.CreateNote;
+        if (lower is "tasks" or "task" or "to-do" or "todo" or "कार्य" or "टास्क" or "పనులు" or "టాస్క్") return AssistantIntent.CreateTask;
+        if (lower is "appointments" or "appointment" or "meetings" or "meeting" or "calendar" or "मीटिंग" or "मीटिंग्स" or "అపాయింట్" or "మీటింగ్") return AssistantIntent.CreateAppointment;
+        if (lower is "reminders" or "reminder" or "रिमाइंडर" or "రిమైండర్") return AssistantIntent.CreateReminder;
+        return null;
+    }
+
+    private static string SectionLabel(AssistantIntent intent) => intent switch
+    {
+        AssistantIntent.CreateNote => "Notes",
+        AssistantIntent.CreateTask => "Tasks",
+        AssistantIntent.CreateAppointment => "Appointments",
+        AssistantIntent.CreateReminder => "Reminders",
+        _ => "Tasks"
+    };
+
+    private static string SectionNameForPrompt(ParsedCommand cmd, string language)
+    {
+        return string.IsNullOrWhiteSpace(cmd.Section) ? SectionLabel(cmd.Intent) : cmd.Section;
     }
 
     // ---------------------------------------------------------------

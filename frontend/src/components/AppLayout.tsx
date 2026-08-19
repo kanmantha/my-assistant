@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { Home, ListTodo, Calendar, StickyNote, BellRing, Settings, Search, MessageSquare, LogOut, Sparkles, History } from "lucide-react";
+import { Home, ListTodo, Calendar, StickyNote, BellRing, Settings, Search, MessageSquare, LogOut, Sparkles, History, CalendarDays } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { useAssistant } from "../contexts/AssistantContext";
@@ -8,6 +8,7 @@ import { t } from "../utils/locale";
 
 const DESKTOP_NAV = [
   { to: "/", icon: Home, key: "home" },
+  { to: "/today", icon: CalendarDays, key: "today" },
   { to: "/tasks", icon: ListTodo, key: "tasks" },
   { to: "/calendar", icon: Calendar, key: "calendar" },
   { to: "/notes", icon: StickyNote, key: "notes" },
@@ -19,6 +20,7 @@ const DESKTOP_NAV = [
 
 const MOBILE_NAV = [
   { to: "/", icon: Home, key: "home" },
+  { to: "/today", icon: CalendarDays, key: "today" },
   { to: "/tasks", icon: ListTodo, key: "tasks" },
   { to: "/calendar", icon: Calendar, key: "calendar" },
   { to: "/notes", icon: StickyNote, key: "notes" },

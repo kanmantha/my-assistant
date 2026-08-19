@@ -241,6 +241,27 @@ public class HeuristicAIServiceTests
         var parsed = await Parse("explain photosynthesis", "en");
         parsed.Intent.Should().Be(AssistantIntent.GeneralQuestion);
     }
+
+    [Fact]
+    public async Task TodaySchedule_ListDownTodaysEvents_IsTodaySchedule()
+    {
+        var parsed = await Parse("list down today's events", "en");
+        parsed.Intent.Should().Be(AssistantIntent.TodaySchedule);
+    }
+
+    [Fact]
+    public async Task TodaySchedule_Agenda_IsTodaySchedule()
+    {
+        var parsed = await Parse("what is on my agenda today", "en");
+        parsed.Intent.Should().Be(AssistantIntent.TodaySchedule);
+    }
+
+    [Fact]
+    public async Task TomorrowSchedule_TomorrowsEvents_IsTomorrowSchedule()
+    {
+        var parsed = await Parse("tomorrow's events", "en");
+        parsed.Intent.Should().Be(AssistantIntent.TomorrowSchedule);
+    }
 }
 
 public class AssistantServiceAutoLanguageTests
@@ -379,7 +400,8 @@ public class AssistantServiceGuidedCaptureTests
         out InMemoryAssistantSessionStore sessions,
         Mock<INoteService>? notes = null,
         Mock<ITaskService>? tasks = null,
-        Mock<IAppointmentService>? appointments = null)
+        Mock<IAppointmentService>? appointments = null,
+        Mock<IReminderService>? reminders = null)
     {
         sessions = new InMemoryAssistantSessionStore();
         var time = new Mock<ITimeZoneService>();
@@ -393,7 +415,7 @@ public class AssistantServiceGuidedCaptureTests
         var logger = new Mock<ILogger<AssistantService>>();
         notes ??= new Mock<INoteService>();
         tasks ??= new Mock<ITaskService>();
-        var reminders = new Mock<IReminderService>();
+        reminders ??= new Mock<IReminderService>();
         reminders.Setup(r => r.GetAllAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new List<ReminderDto>());
         appointments ??= new Mock<IAppointmentService>();
         var search = new Mock<ISearchService>();
@@ -413,7 +435,7 @@ public class AssistantServiceGuidedCaptureTests
     }
 
     [Fact]
-    public async Task AddNote_Bare_AsksCategory_ThenContent_ThenCreatesNoteWithTag()
+    public async Task AddNote_Bare_AsksSection_EchoesNotes_ThenCategoryContent_ConfirmsBeforeSave()
     {
         var ai = new Mock<IAssistantAIService>();
         ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
@@ -429,16 +451,28 @@ public class AssistantServiceGuidedCaptureTests
         var service = BuildService(ai, out var sessions, notes: notes);
 
         var r1 = await Turn(ai, service, "Add Note");
-        r1.CaptureType.Should().Be("category");
-        r1.Reply.Should().Contain("category");
+        r1.CaptureType.Should().Be("section");
+        r1.Reply.Should().Contain("Where should I save");
 
-        var r2 = await Turn(ai, service, "Work");
-        r2.CaptureType.Should().Be("text");
-        r2.Reply.Should().Contain("note");
+        // Choosing the tab echoes it back and moves on to category.
+        var r2 = await Turn(ai, service, "Notes");
+        r2.CaptureType.Should().Be("category");
+        r2.Reply.Should().Contain("Under Notes");
+        r2.Reply.Should().Contain("category");
 
-        var r3 = await Turn(ai, service, "buy milk and eggs");
-        r3.CaptureType.Should().BeNull();
-        r3.Reply.Should().Contain("saved");
+        var r3 = await Turn(ai, service, "Work");
+        r3.CaptureType.Should().Be("text");
+        r3.Reply.Should().Contain("note");
+
+        // Note is NOT saved yet — it must be confirmed first, echoing the destination tab.
+        var r4 = await Turn(ai, service, "buy milk and eggs");
+        r4.NeedsConfirmation.Should().BeTrue();
+        r4.PendingAction.Should().Be(AssistantIntent.CreateNote.ToString());
+        r4.Reply.Should().Contain("under Notes");
+
+        var r5 = await Turn(ai, service, "yes");
+        r5.NeedsConfirmation.Should().BeFalse();
+        r5.Reply.Should().Contain("saved");
 
         notes.Verify(n => n.CreateAsync(_userId,
             It.Is<CreateNoteRequest>(req => req.Content == "buy milk and eggs" && req.Tags.Contains("Work")),
@@ -447,7 +481,44 @@ public class AssistantServiceGuidedCaptureTests
     }
 
     [Fact]
-    public async Task AddTask_Bare_AsksDate_CapturesTomorrow_ThenCategory_ThenTitle_CreatesTask()
+    public async Task AddNote_Bare_SectionThenFreeFormAtCategory_CapturesAsContent_ConfirmsBeforeSave()
+    {
+        var ai = new Mock<IAssistantAIService>();
+        ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
+        var notes = new Mock<INoteService>();
+        notes.Setup(n => n.CreateAsync(It.IsAny<Guid>(), It.IsAny<CreateNoteRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid uid, CreateNoteRequest req, CancellationToken _) => new NoteDto
+            {
+                Id = Guid.NewGuid(),
+                Title = req.Title,
+                Content = req.Content,
+                Tags = req.Tags
+            });
+        var service = BuildService(ai, out var sessions, notes: notes);
+
+        var r1 = await Turn(ai, service, "Add Note");
+        var r2 = await Turn(ai, service, "Notes");
+        r2.CaptureType.Should().Be("category");
+        r2.Reply.Should().Contain("Under Notes");
+
+        // A free-form answer at the category prompt becomes the note content directly.
+        var r3 = await Turn(ai, service, "buy milk on the way home");
+        r3.NeedsConfirmation.Should().BeTrue();
+        r3.PendingAction.Should().Be(AssistantIntent.CreateNote.ToString());
+        r3.Reply.Should().Contain("under Notes");
+
+        var r4 = await Turn(ai, service, "yes");
+        r4.NeedsConfirmation.Should().BeFalse();
+        r4.Reply.Should().Contain("saved");
+
+        notes.Verify(n => n.CreateAsync(_userId,
+            It.Is<CreateNoteRequest>(req => req.Content == "buy milk on the way home" && req.Tags.Count == 0),
+            It.IsAny<CancellationToken>()), Times.Once);
+        sessions.Get(_userId, _session).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AddTask_Bare_SectionThenDate_Time_Category_Title_ConfirmsBeforeSave()
     {
         var ai = new Mock<IAssistantAIService>();
         ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
@@ -458,38 +529,55 @@ public class AssistantServiceGuidedCaptureTests
                 Id = Guid.NewGuid(),
                 Title = req.Title,
                 DueDate = req.DueDate,
+                DueTime = req.DueTime,
                 Category = req.Category
             });
         var service = BuildService(ai, out var sessions, tasks: tasks);
 
         var r1 = await Turn(ai, service, "Add Task");
-        r1.CaptureType.Should().Be("date");
-        r1.Reply.Should().Contain("date");
+        r1.CaptureType.Should().Be("section");
+        r1.Reply.Should().Contain("Where should I save");
+
+        var r2 = await Turn(ai, service, "Tasks");
+        r2.CaptureType.Should().Be("date");
+        r2.Reply.Should().Contain("Under Tasks");
+        r2.Reply.Should().Contain("date");
 
         // "tomorrow" parses as TomorrowSchedule intent but must be captured as the date.
-        var r2 = await Turn(ai, service, "tomorrow");
-        r2.CaptureType.Should().Be("category");
-        r2.Reply.Should().Contain("category");
+        var r3 = await Turn(ai, service, "tomorrow");
+        r3.CaptureType.Should().Be("time");
+        r3.Reply.Should().Contain("time");
 
-        var r3 = await Turn(ai, service, "Personal");
-        r3.CaptureType.Should().Be("text");
-        r3.Reply.Should().Contain("task");
+        var r4 = await Turn(ai, service, "3 PM");
+        r4.CaptureType.Should().Be("category");
+        r4.Reply.Should().Contain("category");
 
-        var r4 = await Turn(ai, service, "Prepare monthly report");
-        r4.CaptureType.Should().BeNull();
-        r4.Reply.Should().Contain("added");
+        var r5 = await Turn(ai, service, "Personal");
+        r5.CaptureType.Should().Be("text");
+        r5.Reply.Should().Contain("task");
+
+        // Task is not saved until confirmed; the prompt echoes the Tasks tab.
+        var r6 = await Turn(ai, service, "Prepare monthly report");
+        r6.NeedsConfirmation.Should().BeTrue();
+        r6.PendingAction.Should().Be(AssistantIntent.CreateTask.ToString());
+        r6.Reply.Should().Contain("under Tasks");
+
+        var r7 = await Turn(ai, service, "yes");
+        r7.NeedsConfirmation.Should().BeFalse();
+        r7.Reply.Should().Contain("added");
 
         tasks.Verify(t => t.CreateAsync(_userId,
             It.Is<CreateTaskRequest>(req =>
                 req.Title == "Prepare monthly report" &&
                 req.Category == "Personal" &&
-                req.DueDate == DateOnly.FromDateTime(new DateTime(2026, 8, 14, 0, 0, 0, DateTimeKind.Utc))),
+                req.DueDate == DateOnly.FromDateTime(new DateTime(2026, 8, 14, 0, 0, 0, DateTimeKind.Utc)) &&
+                req.DueTime == new TimeOnly(15, 0)),
             It.IsAny<CancellationToken>()), Times.Once);
         sessions.Get(_userId, _session).Should().BeNull();
     }
 
     [Fact]
-    public async Task AddTask_SkipDate_AdvancesToCategory_AndCreatesTaskWithoutDate()
+    public async Task AddTask_SkipSectionDateAndTime_AdvancesToCategory_AndConfirmsBeforeSave()
     {
         var ai = new Mock<IAssistantAIService>();
         ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
@@ -504,19 +592,28 @@ public class AssistantServiceGuidedCaptureTests
         var service = BuildService(ai, out var sessions, tasks: tasks);
 
         var r1 = await Turn(ai, service, "Add Task");
-        r1.CaptureType.Should().Be("date");
+        r1.CaptureType.Should().Be("section");
 
-        var r2 = await Turn(ai, service, "skip");
-        r2.CaptureType.Should().Be("category");
+        var r2 = await Turn(ai, service, "Tasks");
+        r2.CaptureType.Should().Be("date");
 
-        var r3 = await Turn(ai, service, "Work");
-        r3.CaptureType.Should().Be("text");
+        var r3 = await Turn(ai, service, "skip");
+        r3.CaptureType.Should().Be("time");
 
-        var r4 = await Turn(ai, service, "File taxes");
-        r4.CaptureType.Should().BeNull();
+        var r4 = await Turn(ai, service, "skip");
+        r4.CaptureType.Should().Be("category");
+
+        var r5 = await Turn(ai, service, "Work");
+        r5.CaptureType.Should().Be("text");
+
+        var r6 = await Turn(ai, service, "File taxes");
+        r6.NeedsConfirmation.Should().BeTrue();
+
+        var r7 = await Turn(ai, service, "yes");
+        r7.NeedsConfirmation.Should().BeFalse();
 
         tasks.Verify(t => t.CreateAsync(_userId,
-            It.Is<CreateTaskRequest>(req => req.Title == "File taxes" && req.DueDate == null),
+            It.Is<CreateTaskRequest>(req => req.Title == "File taxes" && req.DueDate == null && req.DueTime == null),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -528,16 +625,16 @@ public class AssistantServiceGuidedCaptureTests
         var service = BuildService(ai, out var sessions);
 
         var r1 = await Turn(ai, service, "Add Note");
-        r1.CaptureType.Should().Be("category");
+        r1.CaptureType.Should().Be("section");
 
-        // A genuine list command while mid-capture must be dispatched, not consumed as a category.
+        // A genuine list command while mid-capture must be dispatched, not consumed as a section answer.
         var r2 = await Turn(ai, service, "Today Tasks Reminders");
         r2.Intent.Should().Be(AssistantIntent.ListReminders.ToString());
         sessions.Get(_userId, _session).Should().BeNull();
     }
 
     [Fact]
-    public async Task ScheduleMeeting_Bare_AsksDate_ThenTitle_ThenConfirmation()
+    public async Task ScheduleMeeting_Bare_AsksDateThenTime_ThenTitle_ThenConfirmation()
     {
         var ai = new Mock<IAssistantAIService>();
         ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
@@ -556,18 +653,96 @@ public class AssistantServiceGuidedCaptureTests
         r1.CaptureType.Should().Be("date");
 
         var r2 = await Turn(ai, service, "tomorrow");
-        r2.CaptureType.Should().Be("text");
-        r2.Reply.Should().Contain("meeting");
+        r2.CaptureType.Should().Be("time");
 
-        var r3 = await Turn(ai, service, "Team standup");
-        r3.NeedsConfirmation.Should().BeTrue();
-        r3.PendingAction.Should().Be(AssistantIntent.CreateAppointment.ToString());
+        var r3 = await Turn(ai, service, "3 PM");
+        r3.CaptureType.Should().Be("text");
+        r3.Reply.Should().Contain("meeting");
 
-        var r4 = await Turn(ai, service, "yes");
-        r4.NeedsConfirmation.Should().BeFalse();
+        var r4 = await Turn(ai, service, "Team standup");
+        r4.NeedsConfirmation.Should().BeTrue();
+        r4.PendingAction.Should().Be(AssistantIntent.CreateAppointment.ToString());
+
+        var r5 = await Turn(ai, service, "yes");
+        r5.NeedsConfirmation.Should().BeFalse();
 
         appointments.Verify(a => a.CreateAsync(_userId,
             It.Is<CreateAppointmentRequest>(req => req.Title == "Team standup"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        sessions.Get(_userId, _session).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AddTask_FullySpecified_ConfirmsBeforeSaving()
+    {
+        var ai = new Mock<IAssistantAIService>();
+        ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
+        ai.Setup(a => a.ParseCommandAsync("add a task to buy milk", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ParsedCommand { Intent = AssistantIntent.CreateTask, Language = "en-IN", Title = "buy milk" });
+        var tasks = new Mock<ITaskService>();
+        tasks.Setup(t => t.CreateAsync(It.IsAny<Guid>(), It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid uid, CreateTaskRequest req, CancellationToken _) => new TaskDto { Id = Guid.NewGuid(), Title = req.Title });
+        var service = BuildService(ai, out var sessions, tasks: tasks);
+
+        var r1 = await service.ProcessAsync(Req("add a task to buy milk"), _userId);
+        r1.NeedsConfirmation.Should().BeTrue();
+        r1.PendingAction.Should().Be(AssistantIntent.CreateTask.ToString());
+        r1.Reply.Should().Contain("buy milk");
+        r1.Reply.Should().Contain("Tasks");
+
+        var r2 = await Turn(ai, service, "yes");
+        r2.NeedsConfirmation.Should().BeFalse();
+
+        tasks.Verify(t => t.CreateAsync(_userId,
+            It.Is<CreateTaskRequest>(req => req.Title == "buy milk"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        sessions.Get(_userId, _session).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AddNote_FullySpecified_ConfirmsBeforeSaving()
+    {
+        var ai = new Mock<IAssistantAIService>();
+        ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
+        ai.Setup(a => a.ParseCommandAsync("create a note called Grocery List saying buy milk", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ParsedCommand { Intent = AssistantIntent.CreateNote, Language = "en-IN", Title = "Grocery List", Content = "buy milk" });
+        var notes = new Mock<INoteService>();
+        notes.Setup(n => n.CreateAsync(It.IsAny<Guid>(), It.IsAny<CreateNoteRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid uid, CreateNoteRequest req, CancellationToken _) => new NoteDto { Id = Guid.NewGuid(), Title = req.Title, Content = req.Content });
+        var service = BuildService(ai, out var sessions, notes: notes);
+
+        var r1 = await service.ProcessAsync(Req("create a note called Grocery List saying buy milk"), _userId);
+        r1.NeedsConfirmation.Should().BeTrue();
+        r1.PendingAction.Should().Be(AssistantIntent.CreateNote.ToString());
+        r1.Reply.Should().Contain("under Notes");
+
+        var r2 = await Turn(ai, service, "yes");
+        r2.NeedsConfirmation.Should().BeFalse();
+        r2.Reply.Should().Contain("saved");
+
+        notes.Verify(n => n.CreateAsync(_userId,
+            It.Is<CreateNoteRequest>(req => req.Content == "buy milk" && req.Title == "Grocery List"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        sessions.Get(_userId, _session).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateReminder_Dispatched_CreatesReminder()
+    {
+        var ai = new Mock<IAssistantAIService>();
+        ai.Setup(a => a.DetectLanguageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("en-IN");
+        ai.Setup(a => a.ParseCommandAsync("remind me to call mom", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ParsedCommand { Intent = AssistantIntent.CreateReminder, Language = "en-IN", Title = "call mom" });
+        var reminders = new Mock<IReminderService>();
+        reminders.Setup(r => r.CreateAsync(It.IsAny<Guid>(), It.IsAny<CreateReminderRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid uid, CreateReminderRequest req, CancellationToken _) => new ReminderDto { Id = Guid.NewGuid(), Title = req.Title, ReminderAt = DateTime.UtcNow });
+        var service = BuildService(ai, out var sessions, reminders: reminders);
+
+        var r1 = await service.ProcessAsync(Req("remind me to call mom"), _userId);
+
+        r1.Intent.Should().Be(AssistantIntent.CreateReminder.ToString());
+        reminders.Verify(r => r.CreateAsync(_userId,
+            It.Is<CreateReminderRequest>(req => req.Title == "call mom"),
             It.IsAny<CancellationToken>()), Times.Once);
         sessions.Get(_userId, _session).Should().BeNull();
     }

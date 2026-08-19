@@ -71,6 +71,27 @@ public static class AssistantReplies
         _ => "Which category should I save it under? Work, Personal, or Shopping? You can also say 'skip'."
     };
 
+    public static string AskSection(string lang) => lang switch
+    {
+        "hi-IN" => "इसे कहाँ सेव करूँ? Notes, Tasks, या Appointments?",
+        "te-IN" => "దీనిని ఎక్కడ సేవ్ చేయాలి? Notes, Tasks, లేదా Appointments?",
+        _ => "Where should I save this? Notes, Tasks, or Appointments?"
+    };
+
+    public static string AskTime(string lang) => lang switch
+    {
+        "hi-IN" => "ठीक है, कितने बजे? आप 'छोड़ें' कह सकते हैं।",
+        "te-IN" => "సరే, ఏ సమయానికి? మీరు 'వదిలేయండి' అని చెప్పవచ్చు.",
+        _ => "Sure, at what time? You can say 'skip' if none."
+    };
+
+    public static string SectionEcho(string section, string lang) => lang switch
+    {
+        "hi-IN" => $"ठीक है, {section} में।",
+        "te-IN" => $"సరే, {section}లో.",
+        _ => $"Under {section}."
+    };
+
     public static string Cancelled(string lang) => lang switch
     {
         "hi-IN" => "ठीक है, मैंने वह क्रिया रद्द कर दी है।",

@@ -26,6 +26,8 @@ export async function runAssistant() {
     ["What's on my calendar this week?", "ListAppointments", "en calendar week"],
     ["What is my schedule today?", "TodaySchedule", "en today"],
     ["What is my schedule tomorrow?", "TomorrowSchedule", "en tomorrow"],
+    ["List down today's events", "TodaySchedule", "en today's events"],
+    ["What's on my agenda today", "TodaySchedule", "en agenda today"],
     ["Take a note about the meeting", "CreateNote", "en create note"],
     ["Note down: buy milk on the way home", "CreateNote", "en create note 2"],
     ["Create a task called Buy milk", "CreateTask", "en create task"],
@@ -57,7 +59,9 @@ export async function runAssistant() {
   // Schedule parsing: verify via tasks list that title is clean + due separate
   {
     await cmd("Add a task called uni-longwinded-test by tomorrow at 5 PM");
+    await cmd("Yes");
     await cmd("Add a task called schedule-uni-check-review");
+    await cmd("Yes");
     const r = await api("GET", "/api/tasks", { token: tkn });
     const tasks = r.json?.data ?? [];
     const clean = tasks.filter(x => String(x.title) === "uni-longwinded-test");
@@ -77,8 +81,10 @@ export async function runAssistant() {
   // Task completion: fuzzy with a real created task
   {
     await cmd("Add a task called ReviewDeploymentQA");
+    await cmd("Yes");
     const c1 = await cmd("Complete task ReviewDeploymentQA");
-    S.check(c1.intent === "CompleteTask", "complete task fuzzy", `intent=${c1.intent} reply=${c1.reply?.slice(0,60)}`);
+    S.check(c1.intent === "CompleteTask" && c1.data?.needsConfirmation === true, "complete task fuzzy", `intent=${c1.intent} needsConf=${c1.data?.needsConfirmation}`);
+    await cmd("Yes");
   }
 
   // Multi-turn confirmation used with real meeting
@@ -91,10 +97,34 @@ export async function runAssistant() {
     // Complete a real task, then decline -> should cancel.
     const sid2 = "qa2-" + Date.now();
     await cmd("Add a task uniConfSampl");
+    await cmd("Yes");
     const n1 = await cmd("Complete task uniConfSampl", "Auto", sid2);
     S.check(n1.intent === "CompleteTask" && n1.data?.needsConfirmation === true, "real task asks confirmation", `intent=${n1.intent} needsConf=${n1.data?.needsConfirmation}`);
     const n2 = await cmd("No", "Auto", sid2);
     S.check(n2.intent === "CancelAction" || n2.intent === "Unknown", "mt declines (cancel or no-op)", `intent=${n2.intent}`);
+  }
+
+  // New: creates confirm before saving, echoing the destination tab
+  {
+    const sid = "qa-confirm-" + Date.now();
+    const t1 = await cmd("Add a task called uni-confirm-echo", "Auto", sid);
+    S.check(t1.data?.needsConfirmation === true && (t1.reply || "").includes("Tasks"), "task asks confirmation echoing Tasks tab", `needsConf=${t1.data?.needsConfirmation} reply=${t1.reply?.slice(0, 60)}`);
+    const t2 = await cmd("Yes", "Auto", sid);
+    S.check(t2.intent === "CreateTask", "task confirmed -> executed", `intent=${t2.intent}`);
+    const list = await api("GET", "/api/tasks", { token: tkn });
+    const found = (list.json?.data ?? []).find(x => String(x.title) === "uni-confirm-echo");
+    S.check(!!found, "confirmed task persisted", `found=${!!found}`);
+    if (found) await api("DELETE", `/api/tasks/${found.id}`, { token: tkn });
+
+    const sid2 = "qa-note-confirm-" + Date.now();
+    const n1 = await cmd("Add Note", "Auto", sid2);
+    S.check(n1.intent === "CreateNote", "bare add note -> section stage", `intent=${n1.intent}`);
+    const n2 = await cmd("Notes", "Auto", sid2);
+    S.check(n2.intent === "CreateNote", "section answer keeps note intent", `intent=${n2.intent}`);
+    const n3 = await cmd("buy milk on the way home", "Auto", sid2);
+    S.check(n3.data?.needsConfirmation === true && (n3.reply || "").includes("Notes"), "note asks confirmation echoing Notes tab", `needsConf=${n3.data?.needsConfirmation} reply=${n3.reply?.slice(0, 60)}`);
+    const n4 = await cmd("Yes", "Auto", sid2);
+    S.check(n4.intent === "CreateNote", "note confirmed -> executed", `intent=${n4.intent}`);
   }
 
   // Language persistence via ChangeLanguage

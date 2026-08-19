@@ -5,7 +5,7 @@ import { SettingsProvider } from "./contexts/SettingsContext";
 import { AssistantProvider } from "./contexts/AssistantContext";
 import { AppLayout } from "./components/AppLayout";
 import { AuthPage } from "./pages/AuthPages";
-import { DashboardPage, TasksPage, NotesPage, RemindersPage, CalendarPage, SearchPage, SettingsPage, HistoryPage } from "./pages/Pages";
+import { DashboardPage, TodayPage, TasksPage, NotesPage, RemindersPage, CalendarPage, SearchPage, SettingsPage, HistoryPage } from "./pages/Pages";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
@@ -43,6 +43,7 @@ export default function App() {
                 }
               >
                 <Route index element={<DashboardPage />} />
+                <Route path="today" element={<TodayPage />} />
                 <Route path="tasks" element={<TasksPage />} />
                 <Route path="notes" element={<NotesPage />} />
                 <Route path="reminders" element={<RemindersPage />} />

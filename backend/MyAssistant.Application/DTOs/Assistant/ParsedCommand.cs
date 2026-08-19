@@ -20,8 +20,11 @@ public class ParsedCommand
     public string? Language { get; set; }
     public string? SearchQuery { get; set; }
     public string? Category { get; set; }
+    public string? Section { get; set; }
     public bool DateSkipped { get; set; }
     public bool CategorySkipped { get; set; }
+    public bool SectionSkipped { get; set; }
+    public bool TimeSkipped { get; set; }
     public List<string>? Tags { get; set; }
     public bool NeedsConfirmation { get; set; }
     public string? ConfirmationPrompt { get; set; }

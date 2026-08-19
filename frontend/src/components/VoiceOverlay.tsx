@@ -26,6 +26,15 @@ const CATEGORIES = [
   { key: "categoryOther", value: "Other" }
 ];
 
+const SECTIONS = [
+  { key: "sectionNotes", value: "Notes" },
+  { key: "sectionTasks", value: "Tasks" },
+  { key: "sectionAppointments", value: "Appointments" },
+  { key: "sectionReminders", value: "Reminders" }
+];
+
+type CaptureKind = "date" | "category" | "section" | "time";
+
 const ORB_COLORS: Record<AssistantStatus, string> = {
   idle: "from-brand-500 via-brand-400 to-sky-400",
   listening: "from-rose-500 via-pink-500 to-fuchsia-500",
@@ -87,6 +96,15 @@ export function VoiceOverlay() {
   const statusKey = STATUS_TEXT[assistant.status];
   const listening = assistant.status === "listening" || assistant.status === "wake-listening";
   const animate = assistant.status !== "idle";
+
+  const captureTitle = (type: CaptureKind) =>
+    type === "date"
+      ? t("pickDate", uiLang)
+      : type === "time"
+        ? t("pickTime", uiLang)
+        : type === "section"
+          ? t("pickSection", uiLang)
+          : t("pickCategory", uiLang);
 
   // Auto-start listening the moment the overlay opens (voice-first, like Siri).
   useEffect(() => {
@@ -206,9 +224,9 @@ export function VoiceOverlay() {
         {assistant.capture && (
           <div className="mx-auto w-full max-w-md rounded-2xl bg-white/95 p-4 shadow-xl dark:bg-slate-800/95">
             <p className="mb-3 text-center text-sm font-medium text-slate-700 dark:text-slate-100">
-              {assistant.capture.type === "date" ? t("pickDate", uiLang) : t("pickCategory", uiLang)}
+              {captureTitle(assistant.capture.type)}
             </p>
-            {assistant.capture.type === "date" ? (
+            {assistant.capture.type === "date" && (
               <div className="flex flex-col items-center gap-3">
                 <input type="date" defaultValue={todayString()} aria-label={t("pickDate", uiLang)} id="assistant-date-picker" className="input w-full" />
                 <div className="flex w-full gap-2">
@@ -226,7 +244,46 @@ export function VoiceOverlay() {
                   </Button>
                 </div>
               </div>
-            ) : (
+            )}
+            {assistant.capture.type === "time" && (
+              <div className="flex flex-col items-center gap-3">
+                <input type="time" defaultValue="09:00" aria-label={t("pickTime", uiLang)} id="assistant-time-picker" className="input w-full" />
+                <div className="flex w-full gap-2">
+                  <Button
+                    className="flex-1"
+                    onClick={() => {
+                      const el = document.getElementById("assistant-time-picker") as HTMLInputElement | null;
+                      void assistant.sendText(el?.value ?? "09:00");
+                    }}
+                  >
+                    {t("save", uiLang)}
+                  </Button>
+                  <Button variant="secondary" className="flex-1" onClick={() => void assistant.sendText("skip")}>
+                    {t("skip", uiLang)}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {assistant.capture.type === "section" && (
+              <div className="flex flex-wrap justify-center gap-2">
+                {SECTIONS.map((s) => (
+                  <button
+                    key={s.value}
+                    className="rounded-full border border-brand-200 bg-brand-50 px-4 py-1.5 text-sm font-medium text-brand-700 transition hover:bg-brand-100 dark:border-brand-800 dark:bg-brand-900/30 dark:text-brand-300 dark:hover:bg-brand-900/60"
+                    onClick={() => void assistant.sendText(s.value)}
+                  >
+                    {t(s.key, uiLang)}
+                  </button>
+                ))}
+                <button
+                  className="rounded-full border border-slate-200 px-4 py-1.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+                  onClick={() => void assistant.sendText("skip")}
+                >
+                  {t("skip", uiLang)}
+                </button>
+              </div>
+            )}
+            {assistant.capture.type === "category" && (
               <div className="flex flex-wrap justify-center gap-2">
                 {CATEGORIES.map((c) => (
                   <button

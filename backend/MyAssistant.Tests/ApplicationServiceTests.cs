@@ -58,6 +58,35 @@ public class DateTimeParserServiceTests
         result.HasDate.Should().BeFalse();
         result.HasTime.Should().BeFalse();
     }
+
+    [Fact]
+    public async Task Parse_English_IsoDate_ReturnsDateOnly()
+    {
+        var parser = CreateParser(new DateTime(2026, 8, 13, 10, 0, 0, DateTimeKind.Utc));
+        var result = await parser.ParseAsync("2026-08-20", "en", "Asia/Kolkata");
+        result.HasDate.Should().BeTrue();
+        result.HasTime.Should().BeFalse();
+        result.DateTime.Should().Be(new DateTime(2026, 8, 20, 0, 0, 0, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public async Task Parse_English_24HourTime_ReturnsTime()
+    {
+        var parser = CreateParser(new DateTime(2026, 8, 13, 10, 0, 0, DateTimeKind.Utc));
+        var result = await parser.ParseAsync("14:30", "en", "Asia/Kolkata");
+        result.HasTime.Should().BeTrue();
+        result.DateTime.Should().Be(new DateTime(2026, 8, 13, 14, 30, 0, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public async Task Parse_English_IsoDateWith24HourTime_CombinesBoth()
+    {
+        var parser = CreateParser(new DateTime(2026, 8, 13, 10, 0, 0, DateTimeKind.Utc));
+        var result = await parser.ParseAsync("2026-08-20 14:30", "en", "Asia/Kolkata");
+        result.HasDate.Should().BeTrue();
+        result.HasTime.Should().BeTrue();
+        result.DateTime.Should().Be(new DateTime(2026, 8, 20, 14, 30, 0, DateTimeKind.Utc));
+    }
 }
 
 public class SubscriptionServiceTests

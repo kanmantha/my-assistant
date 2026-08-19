@@ -39,6 +39,7 @@ public static class DependencyInjection
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IAssistantIntentService, AssistantService>();
         services.AddSingleton<IAssistantSessionStore, InMemoryAssistantSessionStore>();
+        services.AddScoped<IExternalKnowledgeService, ExternalKnowledgeService>();
 
         return services;
     }
