@@ -192,6 +192,25 @@ class _TodaySummaryIconsState extends State<_TodaySummaryIcons> {
 
   Future<void> _load() async {
     try {
+      final auth = context.read<AuthProvider>();
+      if (auth.demoMode) {
+        final tasksState = context.read<TasksState>();
+        final apptsState = context.read<AppointmentsState>();
+        await tasksState.load();
+        await apptsState.load();
+        if (!mounted) return;
+        setState(() {
+          _taskCount = tasksState.tasks.where((t) => t.status == 'Pending').length;
+          _reminderCount = 0;
+          _apptCount = apptsState.appointments.where((a) {
+            final now = DateTime.now();
+            final today = DateTime(now.year, now.month, now.day);
+            final tomorrow = today.add(const Duration(days: 1));
+            return !a.startDateTime.isBefore(today) && a.startDateTime.isBefore(tomorrow);
+          }).length;
+        });
+        return;
+      }
       final client = context.read<BackendClient>();
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
@@ -215,7 +234,7 @@ class _TodaySummaryIconsState extends State<_TodaySummaryIcons> {
           final dt = r.reminderDateTime;
           return !dt.isBefore(today) && dt.isBefore(tomorrow);
         }).length;
-        _apptCount = appts.where((a) => a.startDateTime.isAfter(today) && a.startDateTime.isBefore(tomorrow)).length;
+        _apptCount = appts.where((a) => !a.startDateTime.isBefore(today) && a.startDateTime.isBefore(tomorrow)).length;
       });
     } catch (_) {}
   }
@@ -326,57 +345,28 @@ class _QuickActions extends StatelessWidget {
   }
 }
 
-class _TodayEventsCard extends StatefulWidget {
+class _TodayEventsCard extends StatelessWidget {
   const _TodayEventsCard();
 
-  @override
-  State<_TodayEventsCard> createState() => _TodayEventsCardState();
-}
-
-class _TodayEventsCardState extends State<_TodayEventsCard> {
-  List<Appointment> _todayEvents = [];
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
+  List<Appointment> _getToday(AppointmentsState state) {
+    final now = DateTime.now();
+    return state.appointments.where((a) {
+      return a.startDateTime.year == now.year &&
+          a.startDateTime.month == now.month &&
+          a.startDateTime.day == now.day;
+    }).toList()
+      ..sort((a, b) => a.startDateTime.compareTo(b.startDateTime));
   }
 
-  Future<void> _load() async {
-    try {
-      final auth = context.read<AuthProvider>();
-      if (auth.demoMode) {
-        final state = context.read<AppointmentsState>();
-        state.setDemo();
-      } else {
-        final state = context.read<AppointmentsState>();
-        await state.load();
-      }
-      if (!mounted) return;
-      final state = context.read<AppointmentsState>();
-      final now = DateTime.now();
-      _todayEvents = state.appointments.where((a) {
-        return a.startDateTime.year == now.year &&
-            a.startDateTime.month == now.month &&
-            a.startDateTime.day == now.day;
-      }).toList()
-        ..sort((a, b) => a.startDateTime.compareTo(b.startDateTime));
-      setState(() => _loading = false);
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _readAloud() async {
-    if (_todayEvents.isEmpty) {
+  Future<void> _readAloud(List<Appointment> events) async {
+    if (events.isEmpty) {
       await TtsService.instance.speak('You have no events scheduled for today.');
       return;
     }
     final timeFmt = DateFormat('h:mm a');
-    var msg = 'Today you have ${_todayEvents.length} event${_todayEvents.length > 1 ? 's' : ''}. ';
-    for (var i = 0; i < _todayEvents.length; i++) {
-      final e = _todayEvents[i];
+    var msg = 'Today you have ${events.length} event${events.length > 1 ? 's' : ''}. ';
+    for (var i = 0; i < events.length; i++) {
+      final e = events[i];
       final timeStr = timeFmt.format(e.startDateTime);
       final loc = e.location.isNotEmpty ? ' at ${e.location}' : '';
       msg += 'Number ${i + 1}: ${e.title}, scheduled for $timeStr$loc. ';
@@ -386,6 +376,8 @@ class _TodayEventsCardState extends State<_TodayEventsCard> {
 
   @override
   Widget build(BuildContext context) {
+    final state = context.watch<AppointmentsState>();
+    final today = _getToday(state);
     final timeFmt = DateFormat('h:mm a');
 
     return Card(
@@ -403,25 +395,18 @@ class _TodayEventsCardState extends State<_TodayEventsCard> {
                 const SizedBox(width: 8),
                 const Text("Today's Events", style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
                 const Spacer(),
-                if (_todayEvents.isNotEmpty)
+                if (today.isNotEmpty)
                   IconButton(
                     icon: const Icon(Icons.volume_up, size: 20),
                     tooltip: 'Read aloud',
-                    onPressed: _readAloud,
+                    onPressed: () => _readAloud(today),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                   ),
               ],
             ),
             const SizedBox(height: 10),
-            if (_loading)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(12),
-                  child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                ),
-              )
-            else if (_todayEvents.isEmpty)
+            if (today.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
@@ -430,8 +415,8 @@ class _TodayEventsCardState extends State<_TodayEventsCard> {
                 ),
               )
             else
-              ...List.generate(_todayEvents.length > 5 ? 5 : _todayEvents.length, (i) {
-                final a = _todayEvents[i];
+              ...List.generate(today.length > 5 ? 5 : today.length, (i) {
+                final a = today[i];
                 final timeStr = timeFmt.format(a.startDateTime);
                 final now = DateTime.now();
                 final diff = a.startDateTime.difference(now);
@@ -489,11 +474,11 @@ class _TodayEventsCardState extends State<_TodayEventsCard> {
                   ),
                 );
               }),
-            if (_todayEvents.length > 5)
+            if (today.length > 5)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  '+ ${_todayEvents.length - 5} more',
+                  '+ ${today.length - 5} more',
                   style: TextStyle(fontSize: 12, color: AppTheme.primary, fontWeight: FontWeight.w500),
                 ),
               ),

@@ -231,7 +231,6 @@ class _AssistantScreenState extends State<AssistantScreen> {
         if (!mounted) return;
         if (result.type == 'note') {
           await context.read<NotesState>().add(result.title, result.content);
-          if (mounted) context.read<NotesState>().load();
         } else if (result.type == 'task') {
           await context.read<TasksState>().add(
             result.title,
@@ -239,7 +238,6 @@ class _AssistantScreenState extends State<AssistantScreen> {
             priority: result.priority,
             dueDate: result.dateTime?.toIso8601String(),
           );
-          if (mounted) context.read<TasksState>().load();
         } else {
           final dt = result.dateTime ?? DateTime.now().add(const Duration(hours: 1));
           await context.read<AppointmentsState>().add(
@@ -248,7 +246,6 @@ class _AssistantScreenState extends State<AssistantScreen> {
             endDateTime: dt.add(const Duration(hours: 1)).toIso8601String(),
             location: result.location,
           );
-          if (mounted) context.read<AppointmentsState>().load();
         }
         if (!mounted) return;
         final msg = '${_capitalize(result.type)} created: "${result.title}"';
@@ -1128,7 +1125,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
     return 'Medium';
   }
 
-  String _capitalize(String s) => s[0].toUpperCase() + s.substring(1);
+  String _capitalize(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
   String _extractAppointmentTitle(String text) {
     var t = text.trim().replaceFirst(_apptPrefix, '').trim();

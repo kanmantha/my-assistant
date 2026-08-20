@@ -54,6 +54,7 @@ class _ConfirmationDialogState extends State<ConfirmationDialog> {
 
   Future<void> _openCalendarFirst() async {
     if (_datePickerOpened || !mounted) return;
+    if (_type == 'note') return;
     _datePickerOpened = true;
     final picked = await showDatePicker(
       context: context,
